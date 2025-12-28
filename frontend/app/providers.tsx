@@ -28,7 +28,6 @@ const arcTestnet = defineChain({
 const { connectors } = getDefaultWallets({
   appName: 'Treasure Trail',
   projectId: process.env.NEXT_PUBLIC_WALLET_CONNECT_ID || 'YOUR_PROJECT_ID',
-  chains: [arcTestnet],
 })
 
 const config = createConfig({
@@ -41,7 +40,11 @@ const config = createConfig({
 
 const queryClient = new QueryClient()
 
-export function Providers({ children }: { children: React.ReactNode }) {
+interface ProvidersProps {
+  readonly children: React.ReactNode
+}
+
+export function Providers({ children }: ProvidersProps) {
   return (
     <WagmiProvider config={config}>
       <QueryClientProvider client={queryClient}>

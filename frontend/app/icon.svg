@@ -1,0 +1,117 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 200 200" class="treasure-trail-logo">
+  <!-- Definitions for gradients -->
+  <defs>
+    <!-- Background gradient -->
+    <linearGradient id="bgGradient" x1="0%" y1="0%" x2="100%" y2="100%">
+      <stop offset="0%" style="stop-color:#1e3a8a;stop-opacity:1" />
+      <stop offset="100%" style="stop-color:#312e81;stop-opacity:1" />
+    </linearGradient>
+    
+    <!-- Border gradient -->
+    <linearGradient id="borderGradient" x1="0%" y1="0%" x2="100%" y2="100%">
+      <stop offset="0%" style="stop-color:#3b82f6;stop-opacity:1" />
+      <stop offset="50%" style="stop-color:#8b5cf6;stop-opacity:1" />
+      <stop offset="100%" style="stop-color:#ec4899;stop-opacity:1" />
+    </linearGradient>
+    
+    <!-- Treasure gradient -->
+    <radialGradient id="treasureGradient" cx="50%" cy="50%" r="50%">
+      <stop offset="0%" style="stop-color:#fbbf24;stop-opacity:1" />
+      <stop offset="100%" style="stop-color:#f59e0b;stop-opacity:1" />
+    </radialGradient>
+    
+    <!-- Start point gradient -->
+    <radialGradient id="startGradient" cx="50%" cy="50%" r="50%">
+      <stop offset="0%" style="stop-color:#34d399;stop-opacity:1" />
+      <stop offset="100%" style="stop-color:#10b981;stop-opacity:1" />
+    </radialGradient>
+    
+    <!-- Grid cell color gradients -->
+    <linearGradient id="cellGradient1" x1="0%" y1="0%" x2="100%" y2="100%">
+      <stop offset="0%" style="stop-color:#1e40af;stop-opacity:0.3" />
+      <stop offset="100%" style="stop-color:#3730a3;stop-opacity:0.3" />
+    </linearGradient>
+    
+    <linearGradient id="cellGradient2" x1="0%" y1="0%" x2="100%" y2="100%">
+      <stop offset="0%" style="stop-color:#2563eb;stop-opacity:0.2" />
+      <stop offset="100%" style="stop-color:#4f46e5;stop-opacity:0.2" />
+    </linearGradient>
+  </defs>
+  
+  <!-- Background circle -->
+  <circle cx="100" cy="100" r="95" fill="url(#bgGradient)" />
+  
+  <!-- Border circle -->
+  <circle cx="100" cy="100" r="95" fill="none" stroke="url(#borderGradient)" stroke-width="3" />
+  
+  <!-- Map background with rounded corners -->
+  <rect x="40" y="40" width="120" height="120" rx="8" fill="#1e293b" opacity="0.8" />
+  
+  <!-- Grid cells - 4x4 grid -->
+  <!-- Row 1 -->
+  <rect x="45" y="45" width="25" height="25" rx="3" fill="url(#cellGradient1)" />
+  <rect x="72" y="45" width="25" height="25" rx="3" fill="url(#cellGradient2)" />
+  <rect x="99" y="45" width="25" height="25" rx="3" fill="url(#cellGradient1)" />
+  <rect x="126" y="45" width="25" height="25" rx="3" fill="url(#cellGradient2)" />
+  
+  <!-- Row 2 -->
+  <rect x="45" y="72" width="25" height="25" rx="3" fill="url(#cellGradient2)" />
+  <rect x="72" y="72" width="25" height="25" rx="3" fill="url(#cellGradient1)" />
+  <rect x="99" y="72" width="25" height="25" rx="3" fill="url(#cellGradient2)" />
+  <rect x="126" y="72" width="25" height="25" rx="3" fill="url(#cellGradient1)" />
+  
+  <!-- Row 3 -->
+  <rect x="45" y="99" width="25" height="25" rx="3" fill="url(#cellGradient1)" />
+  <rect x="72" y="99" width="25" height="25" rx="3" fill="url(#cellGradient2)" />
+  <rect x="99" y="99" width="25" height="25" rx="3" fill="url(#cellGradient1)" />
+  <rect x="126" y="99" width="25" height="25" rx="3" fill="url(#cellGradient2)" />
+  
+  <!-- Row 4 -->
+  <rect x="45" y="126" width="25" height="25" rx="3" fill="url(#cellGradient2)" />
+  <rect x="72" y="126" width="25" height="25" rx="3" fill="url(#cellGradient1)" />
+  <rect x="99" y="126" width="25" height="25" rx="3" fill="url(#cellGradient2)" />
+  <rect x="126" y="126" width="25" height="25" rx="3" fill="url(#cellGradient1)" />
+  
+  <!-- Grid lines -->
+  <!-- Vertical lines -->
+  <line x1="70" y1="45" x2="70" y2="151" stroke="#475569" stroke-width="1" opacity="0.5" />
+  <line x1="97" y1="45" x2="97" y2="151" stroke="#475569" stroke-width="1" opacity="0.5" />
+  <line x1="124" y1="45" x2="124" y2="151" stroke="#475569" stroke-width="1" opacity="0.5" />
+  <line x1="151" y1="45" x2="151" y2="151" stroke="#475569" stroke-width="1" opacity="0.5" />
+  
+  <!-- Horizontal lines -->
+  <line x1="45" y1="70" x2="151" y2="70" stroke="#475569" stroke-width="1" opacity="0.5" />
+  <line x1="45" y1="97" x2="151" y2="97" stroke="#475569" stroke-width="1" opacity="0.5" />
+  <line x1="45" y1="124" x2="151" y2="124" stroke="#475569" stroke-width="1" opacity="0.5" />
+  <line x1="45" y1="151" x2="151" y2="151" stroke="#475569" stroke-width="1" opacity="0.5" />
+  
+  <!-- Path line from start to treasure -->
+  <path d="M 57 57 L 84 84 L 84 111 L 111 138 L 138 138" 
+        stroke="#60a5fa" 
+        stroke-width="3" 
+        fill="none" 
+        stroke-linecap="round"
+        stroke-linejoin="round"
+        opacity="0.6" />
+  
+  <!-- Start point (green circle) -->
+  <circle cx="57" cy="57" r="6" fill="url(#startGradient)" />
+  <circle cx="57" cy="57" r="6" fill="none" stroke="#34d399" stroke-width="2" opacity="0.5" />
+  
+  <!-- Treasure point (gold/yellow circle) -->
+  <circle cx="138" cy="138" r="8" fill="url(#treasureGradient)" />
+  <circle cx="138" cy="138" r="8" fill="none" stroke="#fbbf24" stroke-width="2" opacity="0.5" />
+  
+  <!-- Decorative elements - small dots along path -->
+  <circle cx="70" cy="70" r="2" fill="#60a5fa" opacity="0.8" />
+  <circle cx="84" cy="97" r="2" fill="#60a5fa" opacity="0.8" />
+  <circle cx="97" cy="124" r="2" fill="#60a5fa" opacity="0.8" />
+  <circle cx="124" cy="138" r="2" fill="#60a5fa" opacity="0.8" />
+  
+  <!-- Sparkle effect on treasure -->
+  <path d="M 138 128 L 138 133 M 138 143 L 138 148 M 128 138 L 133 138 M 143 138 L 148 138" 
+        stroke="#fbbf24" 
+        stroke-width="2" 
+        stroke-linecap="round"
+        opacity="0.8" />
+</svg>
