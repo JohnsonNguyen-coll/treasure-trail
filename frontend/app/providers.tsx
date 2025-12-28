@@ -1,0 +1,55 @@
+'use client'
+
+import { WagmiProvider, createConfig, http } from 'wagmi'
+import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
+import { RainbowKitProvider, getDefaultWallets } from '@rainbow-me/rainbowkit'
+import '@rainbow-me/rainbowkit/styles.css'
+import { defineChain } from 'viem'
+
+// Define Arc Testnet chain
+const arcTestnet = defineChain({
+  id: 11155111, // Update with actual Arc Testnet chain ID
+  name: 'Arc Testnet',
+  nativeCurrency: {
+    decimals: 18,
+    name: 'Ether',
+    symbol: 'ETH',
+  },
+  rpcUrls: {
+    default: {
+      http: [process.env.NEXT_PUBLIC_RPC_URL || 'https://rpc.testnet.arc.network'],
+    },
+  },
+  blockExplorers: {
+    default: { name: 'Explorer', url: 'https://explorer.testnet.arc.network' },
+  },
+})
+
+const { connectors } = getDefaultWallets({
+  appName: 'Treasure Trail',
+  projectId: process.env.NEXT_PUBLIC_WALLET_CONNECT_ID || 'YOUR_PROJECT_ID',
+  chains: [arcTestnet],
+})
+
+const config = createConfig({
+  chains: [arcTestnet],
+  connectors,
+  transports: {
+    [arcTestnet.id]: http(),
+  },
+})
+
+const queryClient = new QueryClient()
+
+export function Providers({ children }: { children: React.ReactNode }) {
+  return (
+    <WagmiProvider config={config}>
+      <QueryClientProvider client={queryClient}>
+        <RainbowKitProvider>
+          {children}
+        </RainbowKitProvider>
+      </QueryClientProvider>
+    </WagmiProvider>
+  )
+}
+
