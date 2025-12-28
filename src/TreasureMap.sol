@@ -76,9 +76,9 @@ contract TreasureMap {
     address public owner;           // Contract owner
     
     // Probability thresholds (out of 100)
-    uint8 private constant EMPTY_THRESHOLD = 50;      // 0-49: Empty (50%)
-    uint8 private constant REWARD_THRESHOLD = 90;     // 50-89: Reward (40%)
-    // 90-99: Treasure (10%)
+    uint8 private constant EMPTY_THRESHOLD = 70;      // 0-69: Empty (70%) - no reward
+    uint8 private constant REWARD_THRESHOLD = 95;     // 70-94: Reward (25%) - small reward
+    // 95-99: Treasure (5%) - big reward
     
     // ============ Events ============
     

@@ -7,8 +7,15 @@ export const TREASURE_MAP_ABI = [
     type: 'function',
   },
   {
-    inputs: [],
+    inputs: [{ internalType: 'uint8', name: 'direction', type: 'uint8' }],
     name: 'move',
+    outputs: [],
+    stateMutability: 'nonpayable',
+    type: 'function',
+  },
+  {
+    inputs: [],
+    name: 'buyShield',
     outputs: [],
     stateMutability: 'nonpayable',
     type: 'function',
@@ -24,12 +31,51 @@ export const TREASURE_MAP_ABI = [
     inputs: [{ internalType: 'address', name: 'player', type: 'address' }],
     name: 'getGame',
     outputs: [
-      { internalType: 'uint256', name: 'seed', type: 'uint256' },
-      { internalType: 'uint8', name: 'position', type: 'uint8' },
+      { internalType: 'bytes32', name: 'seedCommit', type: 'bytes32' },
+      {
+        components: [
+          { internalType: 'uint8', name: 'x', type: 'uint8' },
+          { internalType: 'uint8', name: 'y', type: 'uint8' },
+        ],
+        internalType: 'struct TreasureMap.Position',
+        name: 'currentPos',
+        type: 'tuple',
+      },
+      {
+        components: [
+          { internalType: 'uint8', name: 'x', type: 'uint8' },
+          { internalType: 'uint8', name: 'y', type: 'uint8' },
+        ],
+        internalType: 'struct TreasureMap.Position',
+        name: 'startPos',
+        type: 'tuple',
+      },
+      {
+        components: [
+          { internalType: 'uint8', name: 'x', type: 'uint8' },
+          { internalType: 'uint8', name: 'y', type: 'uint8' },
+        ],
+        internalType: 'struct TreasureMap.Position',
+        name: 'endPos',
+        type: 'tuple',
+      },
       { internalType: 'uint256', name: 'pendingReward', type: 'uint256' },
       { internalType: 'bool', name: 'active', type: 'bool' },
-      { internalType: 'bool', name: 'locked', type: 'bool' },
+      { internalType: 'bool', name: 'hasShield', type: 'bool' },
+      { internalType: 'bool', name: 'shieldPurchased', type: 'bool' },
+      { internalType: 'uint8', name: 'moveCount', type: 'uint8' },
     ],
+    stateMutability: 'view',
+    type: 'function',
+  },
+  {
+    inputs: [
+      { internalType: 'address', name: 'player', type: 'address' },
+      { internalType: 'uint8', name: 'x', type: 'uint8' },
+      { internalType: 'uint8', name: 'y', type: 'uint8' },
+    ],
+    name: 'hasBomb',
+    outputs: [{ internalType: 'bool', name: '', type: 'bool' }],
     stateMutability: 'view',
     type: 'function',
   },
@@ -42,14 +88,35 @@ export const TREASURE_MAP_ABI = [
   },
   {
     inputs: [{ internalType: 'address', name: 'player', type: 'address' }],
-    name: 'getRiskLevel',
-    outputs: [{ internalType: 'uint8', name: '', type: 'uint8' }],
+    name: 'getNextMoveFee',
+    outputs: [{ internalType: 'uint256', name: '', type: 'uint256' }],
+    stateMutability: 'view',
+    type: 'function',
+  },
+  {
+    inputs: [{ internalType: 'address', name: 'player', type: 'address' }],
+    name: 'getShieldPrice',
+    outputs: [{ internalType: 'uint256', name: '', type: 'uint256' }],
     stateMutability: 'view',
     type: 'function',
   },
   {
     inputs: [],
     name: 'entryFee',
+    outputs: [{ internalType: 'uint256', name: '', type: 'uint256' }],
+    stateMutability: 'view',
+    type: 'function',
+  },
+  {
+    inputs: [],
+    name: 'mapSize',
+    outputs: [{ internalType: 'uint8', name: '', type: 'uint8' }],
+    stateMutability: 'view',
+    type: 'function',
+  },
+  {
+    inputs: [],
+    name: 'treasureBonus',
     outputs: [{ internalType: 'uint256', name: '', type: 'uint256' }],
     stateMutability: 'view',
     type: 'function',
@@ -86,4 +153,10 @@ export const USDC_ABI = [
   },
 ] as const
 
-
+// Direction enum values
+export const Direction = {
+  Up: 0,
+  Down: 1,
+  Left: 2,
+  Right: 3,
+} as const
