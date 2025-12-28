@@ -278,7 +278,6 @@ cast call $TREASURE_MAP_ADDRESS \
 TreasureTrail/
 ├── src/
 │   ├── TreasureMap.sol      # Main game contract
-│   ├── MockUSDC.sol         # Mock USDC for testing
 │   └── IERC20.sol           # ERC20 interface
 ├── test/
 │   └── TreasureMap.t.sol    # Test suite

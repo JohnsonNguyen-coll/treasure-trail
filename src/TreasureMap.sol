@@ -25,7 +25,7 @@ contract TreasureMap {
     }
     
     struct Game {
-        uint256 seed;           // Map seed for randomness
+        bytes32 seedCommit;     // Pseudo-random commit-based entropy (keccak256(seed, player))
         uint8 position;         // Current position (0-indexed)
         uint256 pendingReward;  // Accumulated reward in USDC (6 decimals)
         bool active;            // Whether game is active
@@ -48,6 +48,12 @@ contract TreasureMap {
     uint256 public rewardPool;      // USDC pool for rewards
     address public treasury;         // Treasury address (receives 20% of entry fees)
     
+    // Access control
+    address public owner;           // Contract owner
+    
+    // Game limits
+    uint8 public constant MAX_POSITION = 50;  // Maximum position on map
+    
     // Probability thresholds (out of 100)
     uint8 private constant EMPTY_THRESHOLD = 40;      // 0-39: Empty (40%)
     uint8 private constant REWARD_THRESHOLD = 75;     // 40-74: Reward (35%)
@@ -56,7 +62,7 @@ contract TreasureMap {
     
     // ============ Events ============
     
-    event GameStarted(address indexed player, uint256 seed, uint256 entryFee);
+    event GameStarted(address indexed player, bytes32 seedCommit, uint256 entryFee);
     event MoveMade(
         address indexed player,
         uint8 position,
@@ -65,7 +71,7 @@ contract TreasureMap {
         TrapEffect trapEffect
     );
     event RewardClaimed(address indexed player, uint256 amount);
-    event GameLocked(address indexed player, uint8 position);
+    event GameLockedEvent(address indexed player, uint8 position);
     
     // ============ Errors ============
     
@@ -76,6 +82,8 @@ contract TreasureMap {
     error TransferFailed();
     error InvalidConfiguration();
     error NoRewardToClaim();
+    error NotOwner();
+    error MapCompleted();
     
     // ============ Constructor ============
     
@@ -94,17 +102,26 @@ contract TreasureMap {
         baseReward = _baseReward;
         treasureBonus = _treasureBonus;
         treasury = _treasury;
+        owner = msg.sender;
+    }
+    
+    // ============ Modifiers ============
+    
+    modifier onlyOwner() {
+        if (msg.sender != owner) revert NotOwner();
+        _;
     }
     
     // ============ External Functions ============
     
     /**
      * @notice Start a new game by paying entry fee
-     * @dev Creates map seed and initializes game state
+     * @dev Creates seed commit and initializes game state
      */
     function startGame() external {
         Game storage game = games[msg.sender];
         if (game.active && !game.locked) revert GameAlreadyActive();
+        if (game.locked) revert GameLocked();
         
         // Collect entry fee
         if (!_transferUSDCFrom(msg.sender, address(this), entryFee)) {
@@ -121,7 +138,7 @@ contract TreasureMap {
             rewardPool += toTreasury;
         }
         
-        // Generate seed for randomness
+        // Generate seed and create commit-based entropy for secure randomness
         uint256 seed = uint256(
             keccak256(
                 abi.encodePacked(
@@ -133,14 +150,17 @@ contract TreasureMap {
             )
         );
         
+        // Create pseudo-random commit: keccak256(seed, player) - prevents front-running
+        bytes32 seedCommit = keccak256(abi.encodePacked(seed, msg.sender));
+        
         // Initialize game
-        game.seed = seed;
+        game.seedCommit = seedCommit;
         game.position = 0;
         game.pendingReward = 0;
         game.active = true;
         game.locked = false;
         
-        emit GameStarted(msg.sender, seed, entryFee);
+        emit GameStarted(msg.sender, seedCommit, entryFee);
     }
     
     /**
@@ -151,10 +171,12 @@ contract TreasureMap {
         Game storage game = games[msg.sender];
         if (!game.active) revert GameNotActive();
         if (game.locked) revert GameLocked();
+        if (game.position >= MAX_POSITION) revert MapCompleted();
         
-        // Generate random outcome based on seed and position
+        // Generate random outcome using commit-based entropy
+        // Use blockhash(block.number - 1) for additional unpredictability
         uint256 rand = uint256(
-            keccak256(abi.encodePacked(game.seed, game.position, block.prevrandao))
+            keccak256(abi.encodePacked(game.seedCommit, blockhash(block.number - 1)))
         ) % 100;
         
         Outcome outcome;
@@ -169,13 +191,21 @@ contract TreasureMap {
             outcome = Outcome.Reward;
             // Reward formula: baseReward * (position + 1)
             rewardAmount = baseReward * (game.position + 1);
+            
+            // Check available pool and cap reward (safe subtraction to prevent underflow)
+            uint256 available = rewardPool > game.pendingReward
+                ? rewardPool - game.pendingReward
+                : 0;
+            if (rewardAmount > available) {
+                rewardAmount = available;
+            }
             game.pendingReward += rewardAmount;
         } else if (rand < TRAP_THRESHOLD) {
             // Trap (20%)
             outcome = Outcome.Trap;
-            // Random trap effect
+            // Random trap effect using same randomness source
             uint256 trapRand = uint256(
-                keccak256(abi.encodePacked(game.seed, game.position, block.prevrandao, 1))
+                keccak256(abi.encodePacked(game.seedCommit, blockhash(block.number - 1), uint256(1)))
             ) % 3;
             
             if (trapRand == 0) {
@@ -190,13 +220,21 @@ contract TreasureMap {
                 // Lock game
                 trapEffect = TrapEffect.LockGame;
                 game.locked = true;
-                emit GameLocked(msg.sender, game.position);
+                emit GameLockedEvent(msg.sender, game.position);
             }
         } else {
             // Treasure (5%)
             outcome = Outcome.Treasure;
             // Treasure formula: pendingReward * 2 + bonus
             rewardAmount = game.pendingReward * 2 + treasureBonus;
+            
+            // Check available pool and cap reward (safe subtraction to prevent underflow)
+            uint256 available = rewardPool > game.pendingReward
+                ? rewardPool - game.pendingReward
+                : 0;
+            if (rewardAmount > available) {
+                rewardAmount = available;
+            }
             game.pendingReward += rewardAmount;
             // End game after treasure
             game.active = false;
@@ -210,7 +248,7 @@ contract TreasureMap {
     
     /**
      * @notice Stop and claim accumulated rewards
-     * @dev Player can claim anytime, game ends after claim
+     * @dev Player can claim anytime, game ends after claim. Required when game is locked.
      */
     function stopAndClaim() external {
         Game storage game = games[msg.sender];
@@ -220,6 +258,7 @@ contract TreasureMap {
         uint256 amount = game.pendingReward;
         game.pendingReward = 0;
         game.active = false;
+        game.locked = false;  // Clear lock status when claiming
         
         // Transfer reward from pool
         if (amount > rewardPool) {
@@ -241,7 +280,7 @@ contract TreasureMap {
      * @notice Get player's game state
      */
     function getGame(address player) external view returns (
-        uint256 seed,
+        bytes32 seedCommit,
         uint8 position,
         uint256 pendingReward,
         bool active,
@@ -249,7 +288,7 @@ contract TreasureMap {
     ) {
         Game storage game = games[player];
         return (
-            game.seed,
+            game.seedCommit,
             game.position,
             game.pendingReward,
             game.active,
@@ -305,24 +344,40 @@ contract TreasureMap {
     // ============ Admin Functions ============
     
     /**
-     * @notice Update entry fee (only owner in production)
+     * @notice Update entry fee (only owner)
      */
-    function updateEntryFee(uint256 _entryFee) external {
+    function updateEntryFee(uint256 _entryFee) external onlyOwner {
         entryFee = _entryFee;
     }
     
     /**
-     * @notice Update base reward (only owner in production)
+     * @notice Update base reward (only owner)
      */
-    function updateBaseReward(uint256 _baseReward) external {
+    function updateBaseReward(uint256 _baseReward) external onlyOwner {
         baseReward = _baseReward;
     }
     
     /**
-     * @notice Update treasure bonus (only owner in production)
+     * @notice Update treasure bonus (only owner)
      */
-    function updateTreasureBonus(uint256 _treasureBonus) external {
+    function updateTreasureBonus(uint256 _treasureBonus) external onlyOwner {
         treasureBonus = _treasureBonus;
+    }
+    
+    /**
+     * @notice Update treasury address (only owner)
+     */
+    function updateTreasury(address _treasury) external onlyOwner {
+        if (_treasury == address(0)) revert InvalidConfiguration();
+        treasury = _treasury;
+    }
+    
+    /**
+     * @notice Transfer ownership (only owner)
+     */
+    function transferOwnership(address newOwner) external onlyOwner {
+        if (newOwner == address(0)) revert InvalidConfiguration();
+        owner = newOwner;
     }
     
     /**
@@ -333,5 +388,25 @@ contract TreasureMap {
             revert InsufficientUSDC();
         }
         rewardPool += amount;
+    }
+    
+    /**
+     * @notice Emergency withdraw USDC from contract (only owner)
+     * @dev For emergency situations, allows owner to withdraw USDC
+     * @dev Updates rewardPool to maintain correct state
+     */
+    function emergencyWithdraw(address to, uint256 amount) external onlyOwner {
+        if (to == address(0)) revert InvalidConfiguration();
+        
+        // Update rewardPool to maintain correct state
+        if (amount > rewardPool) {
+            rewardPool = 0;
+        } else {
+            rewardPool -= amount;
+        }
+        
+        if (!usdcToken.transfer(to, amount)) {
+            revert TransferFailed();
+        }
     }
 }

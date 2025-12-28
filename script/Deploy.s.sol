@@ -3,7 +3,7 @@ pragma solidity ^0.8.30;
 
 import "forge-std/Script.sol";
 import "../src/TreasureMap.sol";
-import "../src/MockUSDC.sol";
+import "../src/IERC20.sol";
 
 contract DeployScript is Script {
     // Configuration - adjust these values as needed
@@ -12,9 +12,8 @@ contract DeployScript is Script {
     uint256 public constant TREASURE_BONUS = 10 * 1e6;  // 10 USDC (6 decimals)
     
     // USDC address on Arc Testnet
-    // Note: Replace with actual USDC address on Arc Testnet when available
-    // For now, this will deploy a mock USDC for testing
-    address public constant USDC_ADDRESS = address(0); // Set to actual USDC address
+    // https://docs.arc.network/arc/references/contract-addresses
+    address public constant USDC_ADDRESS = 0x3600000000000000000000000000000000000000;
     
     function run() external {
         uint256 deployerPrivateKey = vm.envUint("PRIVATE_KEY");
@@ -25,20 +24,15 @@ contract DeployScript is Script {
         
         vm.startBroadcast(deployerPrivateKey);
         
-        // Deploy MockUSDC if USDC_ADDRESS is not set
+        // Use real USDC on Arc Testnet
         address usdcAddress = USDC_ADDRESS;
-        if (usdcAddress == address(0)) {
-            console.log("Deploying MockUSDC...");
-            MockUSDC mockUSDC = new MockUSDC(1000000 * 1e6); // 1M USDC
-            usdcAddress = address(mockUSDC);
-            console.log("MockUSDC deployed at:", usdcAddress);
-            
-            // Transfer some USDC to the deployer for testing
-            mockUSDC.transfer(deployer, 10000 * 1e6);
-            console.log("Transferred 10,000 USDC to deployer");
-        } else {
-            console.log("Using existing USDC at:", usdcAddress);
-        }
+        IERC20 usdc = IERC20(usdcAddress);
+        
+        console.log("Using USDC on Arc Testnet at:", usdcAddress);
+        
+        // Check deployer's USDC balance
+        uint256 deployerBalance = usdc.balanceOf(deployer);
+        console.log("Deployer USDC balance:", deployerBalance / 1e6, "USDC");
         
         // Deploy TreasureMap
         console.log("Deploying TreasureMap...");
@@ -57,19 +51,14 @@ contract DeployScript is Script {
         console.log("  Treasure Bonus:", TREASURE_BONUS / 1e6, "USDC");
         console.log("  Treasury:", deployer);
         
-        // If using MockUSDC, fund the contract with USDC for reward pool
-        if (USDC_ADDRESS == address(0)) {
-            MockUSDC(usdcAddress).transfer(address(treasureMap), 50000 * 1e6);
-            treasureMap.fundRewardPool(50000 * 1e6);
-            console.log("Funded TreasureMap with 50,000 USDC for reward pool");
-        }
-        
         vm.stopBroadcast();
         
-        console.log("\n=== Deployment Summary ===");
+        console.log("");
+        console.log("=== Deployment Summary ===");
         console.log("USDC Address:", usdcAddress);
         console.log("TreasureMap Address:", address(treasureMap));
-        console.log("\nAdd to your .env file:");
+        console.log("");
+        console.log("Add to your .env file:");
         console.log("TREASURE_MAP_ADDRESS=", address(treasureMap));
         console.log("USDC_ADDRESS=", usdcAddress);
     }

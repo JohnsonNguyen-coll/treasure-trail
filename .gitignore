@@ -5,7 +5,7 @@ broadcast/
 
 # Environment variables
 .env
-
+.env.local
 # IDE
 .vscode/
 .idea/

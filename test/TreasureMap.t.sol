@@ -3,11 +3,15 @@ pragma solidity ^0.8.30;
 
 import "forge-std/Test.sol";
 import "../src/TreasureMap.sol";
-import "../src/MockUSDC.sol";
+import "../src/IERC20.sol";
 
 contract TreasureMapTest is Test {
     TreasureMap public treasureMap;
-    MockUSDC public usdc;
+    IERC20 public usdc;
+    
+    // USDC address on Arc Testnet
+    // https://docs.arc.network/arc/references/contract-addresses
+    address public constant USDC_ADDRESS = 0x3600000000000000000000000000000000000000;
     
     address public player1 = address(0x1);
     address public player2 = address(0x2);
@@ -19,25 +23,28 @@ contract TreasureMapTest is Test {
     uint256 public constant TREASURE_BONUS = 10 * 1e6;  // 10 USDC
     
     function setUp() public {
-        // Deploy mock USDC
-        usdc = new MockUSDC(1000000 * 1e6); // 1M USDC
+        // Use real USDC on Arc Testnet
+        usdc = IERC20(USDC_ADDRESS);
         
         // Deploy TreasureMap contract
         treasureMap = new TreasureMap(
-            address(usdc),
+            USDC_ADDRESS,
             ENTRY_FEE,
             BASE_REWARD,
             TREASURE_BONUS,
             treasury
         );
         
-        // Fund players with USDC
-        usdc.transfer(player1, 10000 * 1e6);
-        usdc.transfer(player2, 10000 * 1e6);
+        // Fund players with USDC using deal cheatcode
+        deal(USDC_ADDRESS, player1, 10000 * 1e6);
+        deal(USDC_ADDRESS, player2, 10000 * 1e6);
+        deal(USDC_ADDRESS, deployer, 100000 * 1e6);
         
         // Fund contract with USDC for reward pool
-        usdc.transfer(address(treasureMap), 50000 * 1e6);
+        vm.startPrank(deployer);
+        usdc.approve(address(treasureMap), 50000 * 1e6);
         treasureMap.fundRewardPool(50000 * 1e6);
+        vm.stopPrank();
         
         // Approve contract to spend player USDC
         vm.prank(player1);
@@ -91,7 +98,7 @@ contract TreasureMapTest is Test {
     
     function testStartGameInsufficientUSDC() public {
         address poorPlayer = address(0x999);
-        usdc.transfer(poorPlayer, 1 * 1e6); // Only 1 USDC
+        deal(USDC_ADDRESS, poorPlayer, 1 * 1e6); // Only 1 USDC
         
         vm.prank(poorPlayer);
         usdc.approve(address(treasureMap), 10 * 1e6);
