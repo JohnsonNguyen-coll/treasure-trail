@@ -11,9 +11,16 @@ const TREASURE_MAP_ADDRESS = process.env.NEXT_PUBLIC_TREASURE_MAP_ADDRESS as `0x
 const USDC_ADDRESS = process.env.NEXT_PUBLIC_USDC_ADDRESS as `0x${string}`
 
 export default function Home() {
+  const [mounted, setMounted] = useState(false)
   const { address, isConnected } = useAccount()
   const { writeContract, data: hash, isPending } = useWriteContract()
   const { isLoading: isConfirming, isSuccess } = useWaitForTransactionReceipt({ hash })
+  
+  // Separate states for approve and startGame transactions
+  const [approveHash, setApproveHash] = useState<`0x${string}` | undefined>()
+  const [startGameHash, setStartGameHash] = useState<`0x${string}` | undefined>()
+  const { isLoading: isApproving, isSuccess: isApproveSuccess } = useWaitForTransactionReceipt({ hash: approveHash })
+  const { isLoading: isStartingGame, isSuccess: isStartGameSuccess } = useWaitForTransactionReceipt({ hash: startGameHash })
 
   // Game state
   const [gameState, setGameState] = useState<{
@@ -44,6 +51,15 @@ export default function Home() {
     functionName: 'balanceOf',
     args: address ? [address] : undefined,
     query: { enabled: !!address },
+  })
+
+  // Read USDC allowance
+  const { data: allowance, refetch: refetchAllowance } = useReadContract({
+    address: USDC_ADDRESS,
+    abi: USDC_ABI,
+    functionName: 'allowance',
+    args: address && TREASURE_MAP_ADDRESS ? [address, TREASURE_MAP_ADDRESS] : undefined,
+    query: { enabled: !!address && !!TREASURE_MAP_ADDRESS },
   })
 
   // Read entry fee
@@ -102,30 +118,62 @@ export default function Home() {
   }, [fee])
 
   useEffect(() => {
+    setMounted(true)
+  }, [])
+
+  useEffect(() => {
     if (isSuccess) {
       refetchGame()
       refetchBalance()
     }
   }, [isSuccess, refetchGame, refetchBalance])
 
-  const handleStartGame = async () => {
+  // Refetch after approve succeeds
+  useEffect(() => {
+    if (isApproveSuccess) {
+      refetchGame()
+      refetchBalance()
+      refetchAllowance()
+      setApproveHash(undefined) // Reset approve hash
+    }
+  }, [isApproveSuccess, refetchGame, refetchBalance, refetchAllowance])
+
+  // Refetch after startGame succeeds
+  useEffect(() => {
+    if (isStartGameSuccess) {
+      refetchGame()
+      refetchBalance()
+      setStartGameHash(undefined)
+    }
+  }, [isStartGameSuccess, refetchGame, refetchBalance])
+
+  const handleApprove = async () => {
     if (!address || !entryFee) return
 
     try {
-      // First approve USDC
-      await writeContract({
+      const hash = await writeContract({
         address: USDC_ADDRESS,
         abi: USDC_ABI,
         functionName: 'approve',
         args: [TREASURE_MAP_ADDRESS, entryFee],
       })
+      setApproveHash(hash)
+    } catch (error) {
+      console.error('Error approving:', error)
+    }
+  }
 
-      // Then start game
-      await writeContract({
+  const handleStartGame = async () => {
+    if (!address) return
+
+    try {
+      const hash = await writeContract({
         address: TREASURE_MAP_ADDRESS,
         abi: TREASURE_MAP_ABI,
         functionName: 'startGame',
       })
+      setStartGameHash(hash)
+      setApproveHash(undefined) // Reset approve hash
     } catch (error) {
       console.error('Error starting game:', error)
     }
@@ -135,11 +183,13 @@ export default function Home() {
     if (!address) return
 
     try {
-      await writeContract({
+      const hash = await writeContract({
         address: TREASURE_MAP_ADDRESS,
         abi: TREASURE_MAP_ABI,
         functionName: 'move',
       })
+      // Refetch after move transaction is submitted
+      // The useEffect with isSuccess will handle refetch after confirmation
     } catch (error) {
       console.error('Error moving:', error)
     }
@@ -149,11 +199,13 @@ export default function Home() {
     if (!address) return
 
     try {
-      await writeContract({
+      const hash = await writeContract({
         address: TREASURE_MAP_ADDRESS,
         abi: TREASURE_MAP_ABI,
         functionName: 'stopAndClaim',
       })
+      // Refetch after claim transaction is submitted
+      // The useEffect with isSuccess will handle refetch after confirmation
     } catch (error) {
       console.error('Error claiming:', error)
     }
@@ -191,6 +243,26 @@ export default function Home() {
           )
         })}
       </div>
+    )
+  }
+
+  if (!mounted) {
+    return (
+      <main className="min-h-screen bg-gradient-to-br from-purple-900 via-blue-900 to-indigo-900 p-8">
+        <div className="max-w-4xl mx-auto">
+          {/* Header */}
+          <div className="flex justify-between items-center mb-8">
+            <div>
+              <h1 className="text-4xl font-bold text-white mb-2">🗺️ Treasure Trail</h1>
+              <p className="text-gray-300">Risk vs Reward DeFi Adventure</p>
+            </div>
+            <ConnectButton />
+          </div>
+          <div className="bg-white/10 backdrop-blur-lg rounded-2xl p-8 text-center">
+            <p className="text-white text-xl mb-4">Loading...</p>
+          </div>
+        </div>
+      </main>
     )
   }
 
@@ -248,6 +320,11 @@ export default function Home() {
                   <p className="text-red-300 font-bold">⚠️ Game Locked! Claim your rewards now.</p>
                 </div>
               )}
+              {gameState?.active && gameState?.pendingReward === 0n && (
+                <div className="mt-4 p-4 bg-yellow-500/20 rounded-lg border border-yellow-500">
+                  <p className="text-yellow-300 font-bold">💡 Keep moving to earn rewards! You need rewards to claim.</p>
+                </div>
+              )}
             </div>
 
             {/* Map Visualization */}
@@ -275,15 +352,26 @@ export default function Home() {
               <h2 className="text-2xl font-bold text-white mb-4">🎮 Actions</h2>
               <div className="flex flex-col sm:flex-row gap-4">
                 {!gameState?.active ? (
-                  <button
-                    onClick={handleStartGame}
-                    disabled={isPending || isConfirming || !entryFee || usdcBalance < entryFee}
-                    className="flex-1 bg-gradient-to-r from-purple-600 to-blue-600 hover:from-purple-700 hover:to-blue-700 disabled:opacity-50 disabled:cursor-not-allowed text-white font-bold py-4 px-6 rounded-xl transition-all transform hover:scale-105"
-                  >
-                    {isPending || isConfirming
-                      ? 'Processing...'
-                      : `Start Game (${entryFee ? formatUnits(entryFee, 6) : '...'} USDC)`}
-                  </button>
+                  <>
+                    {/* Check if approval is needed */}
+                    {(!allowance || (allowance as bigint) < entryFee) ? (
+                      <button
+                        onClick={handleApprove}
+                        disabled={isApproving || isPending || isConfirming || !entryFee || usdcBalance < entryFee}
+                        className="flex-1 bg-gradient-to-r from-blue-600 to-cyan-600 hover:from-blue-700 hover:to-cyan-700 disabled:opacity-50 disabled:cursor-not-allowed text-white font-bold py-4 px-6 rounded-xl transition-all transform hover:scale-105"
+                      >
+                        {isApproving ? 'Approving...' : `Approve USDC (${entryFee ? formatUnits(entryFee, 6) : '...'} USDC)`}
+                      </button>
+                    ) : (
+                      <button
+                        onClick={handleStartGame}
+                        disabled={isStartingGame || isPending || isConfirming || !entryFee}
+                        className="flex-1 bg-gradient-to-r from-purple-600 to-blue-600 hover:from-purple-700 hover:to-blue-700 disabled:opacity-50 disabled:cursor-not-allowed text-white font-bold py-4 px-6 rounded-xl transition-all transform hover:scale-105"
+                      >
+                        {isStartingGame ? 'Starting Game...' : `Start Game (${entryFee ? formatUnits(entryFee, 6) : '...'} USDC)`}
+                      </button>
+                    )}
+                  </>
                 ) : (
                   <>
                     <button
@@ -298,6 +386,7 @@ export default function Home() {
                       disabled={
                         isPending ||
                         isConfirming ||
+                        !gameState?.active ||
                         !gameState?.pendingReward ||
                         gameState.pendingReward === 0n
                       }

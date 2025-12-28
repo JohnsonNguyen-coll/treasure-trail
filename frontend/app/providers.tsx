@@ -8,12 +8,12 @@ import { defineChain } from 'viem'
 
 // Define Arc Testnet chain
 const arcTestnet = defineChain({
-  id: 11155111, // Update with actual Arc Testnet chain ID
+  id: 5042002, // Arc Testnet chain ID
   name: 'Arc Testnet',
   nativeCurrency: {
-    decimals: 18,
-    name: 'Ether',
-    symbol: 'ETH',
+    decimals: 6,
+    name: 'USD Coin',
+    symbol: 'USDC',
   },
   rpcUrls: {
     default: {

@@ -8,8 +8,14 @@ import "../src/IERC20.sol";
 contract DeployScript is Script {
     // Configuration - adjust these values as needed
     uint256 public constant ENTRY_FEE = 5 * 1e6;        // 5 USDC (6 decimals)
+    uint256 public constant BASE_MOVE_FEE = 3 * 1e5;    // 0.3 USDC (6 decimals) - reduced base move fee
+    uint256 public constant FEE_MULTIPLIER = 12500;     // 1.25x multiplier (12500 basis points)
+    uint256 public constant BASE_SHIELD_PRICE = 2 * 1e6; // 2 USDC (6 decimals)
     uint256 public constant BASE_REWARD = 5 * 1e5;      // 0.5 USDC (6 decimals)
     uint256 public constant TREASURE_BONUS = 10 * 1e6;  // 10 USDC (6 decimals)
+    uint8 public constant MAP_SIZE = 20;                // 20x20 grid
+    uint8 public constant NUM_BOMBS = 15;               // 15 bombs per map
+    uint8 public constant BOMB_DENSITY_NEAR_END = 30;  // 30% additional density near end
     
     // USDC address on Arc Testnet
     // https://docs.arc.network/arc/references/contract-addresses
@@ -39,16 +45,28 @@ contract DeployScript is Script {
         TreasureMap treasureMap = new TreasureMap(
             usdcAddress,
             ENTRY_FEE,
+            BASE_MOVE_FEE,
+            FEE_MULTIPLIER,
+            BASE_SHIELD_PRICE,
             BASE_REWARD,
             TREASURE_BONUS,
+            MAP_SIZE,
+            NUM_BOMBS,
+            BOMB_DENSITY_NEAR_END,
             deployer // Treasury address (using deployer for now)
         );
         
         console.log("TreasureMap deployed at:", address(treasureMap));
         console.log("Configuration:");
         console.log("  Entry Fee:", ENTRY_FEE / 1e6, "USDC");
+        console.log("  Base Move Fee:", BASE_MOVE_FEE / 1e6, "USDC");
+        console.log("  Fee Multiplier:", FEE_MULTIPLIER / 10000, "x");
+        console.log("  Base Shield Price:", BASE_SHIELD_PRICE / 1e6, "USDC");
         console.log("  Base Reward:", BASE_REWARD / 1e6, "USDC");
         console.log("  Treasure Bonus:", TREASURE_BONUS / 1e6, "USDC");
+        console.log("  Map Size:", MAP_SIZE, "x", MAP_SIZE);
+        console.log("  Number of Bombs:", NUM_BOMBS);
+        console.log("  Bomb Density Near End:", BOMB_DENSITY_NEAR_END, "%");
         console.log("  Treasury:", deployer);
         
         vm.stopBroadcast();
