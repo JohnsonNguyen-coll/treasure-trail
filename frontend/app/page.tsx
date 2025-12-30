@@ -318,6 +318,19 @@ export default function Home() {
     gameStateRef.current = gameState
   }, [gameState])
 
+  // Auto-refetch data when wallet is connected
+  useEffect(() => {
+    if (isConnected && address) {
+      // Small delay to ensure wallet is fully connected
+      const timeoutId = setTimeout(() => {
+        safeRefetchGame()
+        refetchBalance()
+        refetchAllowance()
+      }, 500)
+      return () => clearTimeout(timeoutId)
+    }
+  }, [isConnected, address, safeRefetchGame, refetchBalance, refetchAllowance])
+
   useEffect(() => {
     if (isSuccess) {
       safeRefetchGame()
