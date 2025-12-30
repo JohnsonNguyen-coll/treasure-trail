@@ -791,7 +791,9 @@ export default function Home() {
             <div className="text-8xl mb-6 animate-bounce">🎮</div>
             <h2 className="text-4xl font-bold mb-4">Ready to Begin Your Adventure?</h2>
             <p className="text-xl mb-6">Connect your wallet to start the ultimate treasure hunt!</p>
-            <ConnectButton />
+            <div className="flex justify-center">
+              <ConnectButton />
+            </div>
           </div>
         ) : (
           <>
