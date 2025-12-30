@@ -150,11 +150,27 @@ export default function Home() {
 
   useEffect(() => {
     if (gameData) {
+      // Parse endPos safely - handle both object and array formats
+      let endPosX = 0
+      let endPosY = 0
+      if (gameData[3]) {
+        if (typeof gameData[3] === 'object') {
+          // Could be {x: number, y: number} or [x, y]
+          if ('x' in gameData[3] && 'y' in gameData[3]) {
+            endPosX = Number(gameData[3].x)
+            endPosY = Number(gameData[3].y)
+          } else if (Array.isArray(gameData[3])) {
+            endPosX = Number(gameData[3][0])
+            endPosY = Number(gameData[3][1])
+          }
+        }
+      }
+      
       const newGameState = {
         seed: BigInt(gameData[0] as string | number | bigint),
-        currentPos: { x: Number(gameData[1].x), y: Number(gameData[1].y) },
-        startPos: { x: Number(gameData[2].x), y: Number(gameData[2].y) },
-        endPos: { x: Number(gameData[3].x), y: Number(gameData[3].y) },
+        currentPos: { x: Number(gameData[1]?.x ?? gameData[1]?.[0] ?? 0), y: Number(gameData[1]?.y ?? gameData[1]?.[1] ?? 0) },
+        startPos: { x: Number(gameData[2]?.x ?? gameData[2]?.[0] ?? 0), y: Number(gameData[2]?.y ?? gameData[2]?.[1] ?? 0) },
+        endPos: { x: endPosX, y: endPosY },
         pendingReward: BigInt(gameData[4] as string | number | bigint),
         active: gameData[5] as boolean,
         hasShield: gameData[6] as boolean,
@@ -597,23 +613,17 @@ export default function Home() {
   const renderMap = () => {
     if (!gameState || !mapSize) return null
 
-    // Debug: Log endPos to ensure it's set correctly
-    if (gameState.endPos) {
-      console.log('Treasure position:', gameState.endPos)
-    }
-    
     // Ensure endPos is valid (check if it exists and has valid coordinates)
     // Note: x and y can be 0, so we check for null/undefined differently
-    if (gameState.endPos == null || 
-        typeof gameState.endPos.x !== 'number' || 
-        typeof gameState.endPos.y !== 'number' ||
-        gameState.endPos.x < 0 || 
-        gameState.endPos.y < 0 ||
-        gameState.endPos.x >= mapSize || 
-        gameState.endPos.y >= mapSize) {
-      console.warn('endPos is not properly set:', gameState.endPos)
-      // Don't return null, just show the map without treasure indicator
-    }
+    const endPosValid = gameState.endPos != null && 
+        typeof gameState.endPos.x === 'number' && 
+        typeof gameState.endPos.y === 'number' &&
+        !isNaN(gameState.endPos.x) &&
+        !isNaN(gameState.endPos.y) &&
+        gameState.endPos.x >= 0 && 
+        gameState.endPos.y >= 0 &&
+        gameState.endPos.x < mapSize && 
+        gameState.endPos.y < mapSize
 
     const grid = []
     for (let y = mapSize - 1; y >= 0; y--) {
@@ -621,7 +631,14 @@ export default function Home() {
       for (let x = 0; x < mapSize; x++) {
         const isCurrent = x === gameState.currentPos.x && y === gameState.currentPos.y
         const isStart = x === gameState.startPos.x && y === gameState.startPos.y
-        const isEnd = x === gameState.endPos.x && y === gameState.endPos.y
+        // Check isEnd - always try to show treasure if endPos exists and has numeric values
+        const isEnd = gameState.endPos != null && 
+          typeof gameState.endPos.x === 'number' && 
+          typeof gameState.endPos.y === 'number' &&
+          !isNaN(gameState.endPos.x) &&
+          !isNaN(gameState.endPos.y) &&
+          x === gameState.endPos.x && 
+          y === gameState.endPos.y
         const isVisited = false // Could track visited positions
         const hasBomb = bombMap.has(`${x},${y}`)
 
@@ -802,8 +819,17 @@ export default function Home() {
             <h2 className="text-3xl font-black text-transparent bg-clip-text bg-gradient-to-r from-purple-400 to-pink-400">
               🗺️ ADVENTURE MAP ({mapSize}x{mapSize})
             </h2>
+            {gameState?.endPos && (
+              <div className="text-sm text-purple-300">
+                Treasure at: ({gameState.endPos.x}, {gameState.endPos.y})
+              </div>
+            )}
           </div>
-          {renderMap()}
+          {renderMap() || (
+            <div className="text-center text-gray-400 py-12">
+              {!gameState ? 'Start a game to see the map!' : 'Loading map...'}
+            </div>
+          )}
           <div className="mt-6 flex flex-wrap gap-6 justify-center">
             <div className="flex items-center gap-3 bg-slate-900/70 px-4 py-2 rounded-xl border border-emerald-500/30">
               <div className="w-6 h-6 bg-gradient-to-br from-emerald-600 to-green-600 rounded-lg shadow-lg"></div>
