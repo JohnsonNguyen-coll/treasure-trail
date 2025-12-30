@@ -1003,7 +1003,7 @@ export default function Home() {
                             disabled={isPending || isConfirming || isClaiming || !gameState?.pendingReward || gameState.pendingReward === 0n}
                             className="w-full relative overflow-hidden group rounded-xl bg-gradient-to-r from-amber-600 to-orange-600 p-[1px] disabled:opacity-50 disabled:cursor-not-allowed"
                           >
-                            <div className="relative bg-surface-light dark:bg-surface-dark hover:bg-transparent group-hover:bg-transparent transition-colors rounded-xl px-4 py-3 flex items-center justify-between">
+                            <div className="relative bg-surface-light dark:bg-surface-dark hover:bg-transparent group-hover:bg-transparent transition-colors rounded-[11px] px-4 py-3 flex items-center justify-between">
                               <div className="flex items-center gap-3">
                                 <div className="w-8 h-8 rounded-full bg-amber-500/20 flex items-center justify-center">
                                   <span className="material-icons-round text-amber-500 group-hover:text-white transition-colors">emoji_events</span>
@@ -1027,7 +1027,7 @@ export default function Home() {
                                 disabled={isApproving || isPending || isConfirming || !entryFee || usdcBalance < entryFee}
                                 className="w-full relative overflow-hidden group rounded-xl bg-gradient-to-r from-violet-600 to-fuchsia-600 p-[1px] disabled:opacity-50 disabled:cursor-not-allowed"
                               >
-                                <div className="relative bg-surface-light dark:bg-surface-dark hover:bg-transparent group-hover:bg-transparent transition-colors rounded-xl px-4 py-3 flex items-center justify-between">
+                                <div className="relative bg-surface-light dark:bg-surface-dark hover:bg-transparent group-hover:bg-transparent transition-colors rounded-[11px] px-4 py-3 flex items-center justify-between">
                                   <div className="flex items-center gap-3">
                                     <div className="w-8 h-8 rounded-full bg-violet-500/20 flex items-center justify-center">
                                       <span className="material-icons-round text-violet-400 group-hover:text-white transition-colors">lock</span>
@@ -1050,7 +1050,7 @@ export default function Home() {
                                 disabled={isStartingGame || isPending || isConfirming || !entryFee}
                                 className="w-full relative overflow-hidden group rounded-xl bg-gradient-to-r from-violet-600 to-fuchsia-600 p-[1px] disabled:opacity-50 disabled:cursor-not-allowed"
                               >
-                                <div className="relative bg-surface-light dark:bg-surface-dark hover:bg-transparent group-hover:bg-transparent transition-colors rounded-xl px-4 py-3 flex items-center justify-between">
+                                <div className="relative bg-surface-light dark:bg-surface-dark hover:bg-transparent group-hover:bg-transparent transition-colors rounded-[11px] px-4 py-3 flex items-center justify-between">
                                   <div className="flex items-center gap-3">
                                     <div className="w-8 h-8 rounded-full bg-violet-500/20 flex items-center justify-center">
                                       <span className="material-icons-round text-violet-400 group-hover:text-white transition-colors">play_arrow</span>
@@ -1079,7 +1079,7 @@ export default function Home() {
                             disabled={isPending || isConfirming || isBuyingShield || isApproving || !shieldPrice || usdcBalance < (shieldPrice as bigint)}
                             className="w-full relative overflow-hidden group rounded-xl bg-gradient-to-r from-violet-600 to-fuchsia-600 p-[1px] disabled:opacity-50 disabled:cursor-not-allowed"
                           >
-                            <div className="relative bg-surface-light dark:bg-surface-dark hover:bg-transparent group-hover:bg-transparent transition-colors rounded-xl px-4 py-3 flex items-center justify-between">
+                            <div className="relative bg-surface-light dark:bg-surface-dark hover:bg-transparent group-hover:bg-transparent transition-colors rounded-[11px] px-4 py-3 flex items-center justify-between">
                               <div className="flex items-center gap-3">
                                 <div className="w-8 h-8 rounded-full bg-violet-500/20 flex items-center justify-center">
                                   <span className="material-icons-round text-violet-400 group-hover:text-white transition-colors">shield</span>
@@ -1100,7 +1100,7 @@ export default function Home() {
                           disabled={isPending || isConfirming || isClaiming || !gameState?.active || !gameState?.pendingReward || gameState.pendingReward === 0n}
                           className="w-full relative overflow-hidden group rounded-xl bg-gradient-to-r from-amber-600 to-orange-600 p-[1px] disabled:opacity-50 disabled:cursor-not-allowed"
                         >
-                          <div className="relative bg-surface-light dark:bg-surface-dark hover:bg-transparent group-hover:bg-transparent transition-colors rounded-xl px-4 py-3 flex items-center justify-between">
+                          <div className="relative bg-surface-light dark:bg-surface-dark hover:bg-transparent group-hover:bg-transparent transition-colors rounded-[11px] px-4 py-3 flex items-center justify-between">
                             <div className="flex items-center gap-3">
                               <div className="w-8 h-8 rounded-full bg-amber-500/20 flex items-center justify-center">
                                 <span className="material-icons-round text-amber-500 group-hover:text-white transition-colors">lock_clock</span>
