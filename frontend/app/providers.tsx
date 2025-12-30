@@ -5,6 +5,7 @@ import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
 import { RainbowKitProvider, getDefaultWallets } from '@rainbow-me/rainbowkit'
 import '@rainbow-me/rainbowkit/styles.css'
 import { defineChain } from 'viem'
+import { useEffect } from 'react'
 
 // Define Arc Testnet chain
 const arcTestnet = defineChain({
@@ -45,6 +46,42 @@ interface ProvidersProps {
 }
 
 export function Providers({ children }: ProvidersProps) {
+  useEffect(() => {
+    // Suppress wallet extension injection errors (e.g., Razor Wallet)
+    // These errors occur when multiple wallet extensions try to inject ethereum object
+    if (typeof window !== 'undefined') {
+      const originalError = console.error
+      console.error = (...args: any[]) => {
+        // Filter out wallet injection errors
+        const errorMessage = args[0]?.toString() || ''
+        if (
+          errorMessage.includes('Cannot redefine property: ethereum') ||
+          errorMessage.includes('Razor Wallet Injected Successfully')
+        ) {
+          // Silently ignore these errors
+          return
+        }
+        // Log other errors normally
+        originalError.apply(console, args)
+      }
+
+      // Also handle unhandled promise rejections from wallet extensions
+      const handleUnhandledRejection = (event: PromiseRejectionEvent) => {
+        const reason = event.reason?.toString() || ''
+        if (reason.includes('Cannot redefine property: ethereum')) {
+          event.preventDefault()
+        }
+      }
+
+      window.addEventListener('unhandledrejection', handleUnhandledRejection)
+
+      return () => {
+        console.error = originalError
+        window.removeEventListener('unhandledrejection', handleUnhandledRejection)
+      }
+    }
+  }, [])
+
   return (
     <WagmiProvider config={config}>
       <QueryClientProvider client={queryClient}>

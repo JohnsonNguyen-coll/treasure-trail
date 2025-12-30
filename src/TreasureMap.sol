@@ -78,7 +78,7 @@ contract TreasureMap {
     // Probability thresholds (out of 100)
     uint8 private constant EMPTY_THRESHOLD = 70;      // 0-69: Empty (70%) - no reward
     uint8 private constant REWARD_THRESHOLD = 95;     // 70-94: Reward (25%) - small reward
-    // 95-99: Treasure (5%) - big reward
+    // 95-99: Big Reward (5%) - bonus reward, game continues
     
     // ============ Events ============
     
@@ -216,6 +216,10 @@ contract TreasureMap {
             y: uint8(3 * mapSize / 4 + rand4)
         });
         
+        // Clear all previous bomb positions for this player before generating new ones
+        // This ensures each new game starts with a clean bomb map
+        _clearBombPositions(msg.sender);
+        
         // Generate bomb positions
         bytes32 bombHash = _generateBombs(msg.sender, seedCommit, startPos, endPos);
         
@@ -282,22 +286,32 @@ contract TreasureMap {
         bool shieldUsed = false;
         Outcome outcome;
         uint256 rewardAmount = 0;
+        bool gameEnded = false;
         
         if (hitBomb) {
             if (game.hasShield) {
-                // Shield protects from bomb
+                // Shield protects from bomb - move succeeds
                 shieldUsed = true;
                 game.hasShield = false;
                 outcome = Outcome.Empty; // Bomb defused, nothing happens
                 emit BombHit(msg.sender, newPos, true);
+                // Continue with normal move processing below
             } else {
-                // Hit bomb without shield - game over, lose all rewards
+                // Hit bomb without shield - game over immediately, don't update position
                 outcome = Outcome.Bomb;
                 game.pendingReward = 0;
                 game.active = false;
+                gameEnded = true;
                 emit BombHit(msg.sender, newPos, false);
+                // Don't update position or moveCount when dying to bomb
+                // Emit MoveMade with current position (not newPos) since we didn't move
+                emit MoveMade(msg.sender, game.currentPos, direction, outcome, rewardAmount, moveFee, shieldUsed);
+                return;
             }
-        } else {
+        }
+        
+        // Only process move if not dead from bomb
+        if (!gameEnded) {
             // Check if reached treasure (end position)
             if (newPos.x == game.endPos.x && newPos.y == game.endPos.y) {
                 outcome = Outcome.Treasure;
@@ -320,10 +334,10 @@ contract TreasureMap {
                 ) % 100;
                 
                 if (rand < EMPTY_THRESHOLD) {
-                    // Empty (50%)
+                    // Empty (70%)
                     outcome = Outcome.Empty;
                 } else if (rand < REWARD_THRESHOLD) {
-                    // Reward (40%)
+                    // Reward (25%)
                     outcome = Outcome.Reward;
                     // Reward formula: baseReward * (moveCount + 1)
                     rewardAmount = baseReward * (game.moveCount + 1);
@@ -337,8 +351,8 @@ contract TreasureMap {
                     }
                     game.pendingReward += rewardAmount;
                 } else {
-                    // Treasure (10%)
-                    outcome = Outcome.Treasure;
+                    // Big Reward (5%) - bonus reward but game continues
+                    outcome = Outcome.Reward;
                     rewardAmount = game.pendingReward * 2 + treasureBonus;
                     
                     // Check available pool and cap reward
@@ -349,15 +363,14 @@ contract TreasureMap {
                         rewardAmount = available;
                     }
                     game.pendingReward += rewardAmount;
-                    game.active = false;
-                    emit TreasureReached(msg.sender, newPos, rewardAmount);
+                    // Game continues - player can keep playing or stop & claim
                 }
             }
+            
+            // Update position and move count only if move succeeded
+            game.currentPos = newPos;
+            game.moveCount++;
         }
-        
-        // Update position and move count
-        game.currentPos = newPos;
-        game.moveCount++;
         
         emit MoveMade(msg.sender, newPos, direction, outcome, rewardAmount, moveFee, shieldUsed);
     }
@@ -496,6 +509,21 @@ contract TreasureMap {
     // ============ Internal Functions ============
     
     /**
+     * @notice Clear all bomb positions for a player
+     * @dev Called before generating new bombs to ensure clean state
+     * @param player The player address
+     */
+    function _clearBombPositions(address player) internal {
+        // Clear all bomb positions by looping through the entire map
+        // This ensures each new game starts with a clean bomb map
+        for (uint8 x = 0; x < mapSize; x++) {
+            for (uint8 y = 0; y < mapSize; y++) {
+                bombPositions[player][x][y] = false;
+            }
+        }
+    }
+    
+    /**
      * @notice Generate bomb positions on the map
      * @dev Bombs are randomly placed, with higher density near end position
      */
@@ -525,6 +553,14 @@ contract TreasureMap {
             // Don't place bomb on start or end position
             if ((x == startPos.x && y == startPos.y) || (x == endPos.x && y == endPos.y)) {
                 continue;
+            }
+            
+            // Don't place bomb in safe zone around start position (3x3 area)
+            // This gives players a safe starting area to make initial moves
+            int8 distXFromStart = int8(x) - int8(startPos.x);
+            int8 distYFromStart = int8(y) - int8(startPos.y);
+            if (distXFromStart >= -1 && distXFromStart <= 1 && distYFromStart >= -1 && distYFromStart <= 1) {
+                continue; // Skip positions within 1 cell of start (3x3 safe zone)
             }
             
             // Don't place bomb if already exists

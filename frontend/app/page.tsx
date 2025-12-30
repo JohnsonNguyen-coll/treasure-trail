@@ -3,9 +3,8 @@
 import { ConnectButton } from '@rainbow-me/rainbowkit'
 import { useAccount, useReadContract, useWriteContract, useWaitForTransactionReceipt } from 'wagmi'
 import { parseUnits, formatUnits } from 'viem'
-import { useState, useEffect, useMemo } from 'react'
+import { useState, useEffect, useRef, useCallback } from 'react'
 import { TREASURE_MAP_ABI, USDC_ABI, Direction } from '@/lib/abi'
-import { Logo } from './components/Logo'
 
 const TREASURE_MAP_ADDRESS = process.env.NEXT_PUBLIC_TREASURE_MAP_ADDRESS as `0x${string}`
 const USDC_ADDRESS = process.env.NEXT_PUBLIC_USDC_ADDRESS as `0x${string}`
@@ -17,6 +16,7 @@ interface Position {
 
 export default function Home() {
   const [mounted, setMounted] = useState(false)
+  const [darkMode, setDarkMode] = useState(false)
   const { address, isConnected } = useAccount()
   const { writeContract, data: hash, isPending } = useWriteContract()
   const { isLoading: isConfirming, isSuccess } = useWaitForTransactionReceipt({ hash })
@@ -48,18 +48,26 @@ export default function Home() {
 
   const [usdcBalance, setUsdcBalance] = useState<bigint>(0n)
   const [entryFee, setEntryFee] = useState<bigint>(0n)
-  const [mapSize, setMapSize] = useState<number>(20)
-  const [bombMap, setBombMap] = useState<Set<string>>(new Set()) // Store bomb positions as "x,y" strings
+  const [mapSize, setMapSize] = useState<number>(10) // Default to 10, will be updated from contract
+  const [bombMap, setBombMap] = useState<Set<string>>(new Set())
   const [bombNotification, setBombNotification] = useState<{ show: boolean; shielded: boolean }>({ show: false, shielded: false })
-  const [previousGameState, setPreviousGameState] = useState<{ active: boolean; pendingReward: bigint; hasShield: boolean; moveCount: number } | null>(null)
+  const previousGameStateRef = useRef<{ active: boolean; pendingReward: bigint; hasShield: boolean } | null>(null)
+  const [isClaimingReward, setIsClaimingReward] = useState(false)
+  const gameStateRef = useRef<typeof gameState>(null)
+  // Track claim transaction to prevent false bomb notifications
+  const claimTxHashRef = useRef<`0x${string}` | null>(null)
+  // Track move transaction to detect shield usage
+  const moveTxHashRef = useRef<`0x${string}` | null>(null)
+  // Lock to prevent parallel refetches
+  const isRefetchingRef = useRef<boolean>(false)
 
   // Read game state
-  const { data: gameData, refetch: refetchGame } = useReadContract({
+  const { data: gameData, refetch: refetchGame, isLoading: isLoadingGame, isError: isGameError } = useReadContract({
     address: TREASURE_MAP_ADDRESS,
     abi: TREASURE_MAP_ABI,
     functionName: 'getGame',
     args: address ? [address] : undefined,
-    query: { enabled: !!address },
+    query: { enabled: !!address, refetchInterval: false }, // Disable auto refetch, we'll handle it manually
   })
 
   // Read USDC balance
@@ -87,7 +95,7 @@ export default function Home() {
     functionName: 'entryFee',
   })
 
-  // Read map size
+  // Read map size - but force to 10
   const { data: size } = useReadContract({
     address: TREASURE_MAP_ADDRESS,
     abi: TREASURE_MAP_ABI,
@@ -121,86 +129,24 @@ export default function Home() {
     query: { enabled: !!address },
   })
 
-  // Load bomb positions when game is active
   useEffect(() => {
-    if (!gameState?.active || !address || !mapSize) return
-
-    const loadBombs = async () => {
-      const bombs = new Set<string>()
-      // Check all positions for bombs (this is a simple approach, could be optimized)
-      for (let x = 0; x < mapSize; x++) {
-        for (let y = 0; y < mapSize; y++) {
-          try {
-            const hasBomb = await fetch(`/api/hasBomb?player=${address}&x=${x}&y=${y}`)
-              .then(res => res.json())
-              .catch(() => false)
-            // For now, we'll use a client-side approach
-            // In production, you'd want to call the contract directly or use a subgraph
-          } catch (e) {
-            // Ignore errors
-          }
-        }
-      }
-      setBombMap(bombs)
+    // Don't update state if we're loading - keep current state to prevent flickering
+    if (isLoadingGame) {
+      return
     }
 
-    // For demo purposes, we'll show bombs as discovered
-    // In production, you'd fetch from contract or subgraph
-  }, [gameState?.active, address, mapSize])
+    // Don't reset game state if there's an RPC error - keep current state
+    if (isGameError) {
+      console.warn('RPC error when fetching game state, keeping current state')
+      return
+    }
 
-  useEffect(() => {
     if (gameData) {
-      // Parse positions safely - handle both object and array formats
-      let currentPosX = 0
-      let currentPosY = 0
-      if (gameData[1]) {
-        if (typeof gameData[1] === 'object') {
-          // Could be {x: number, y: number} or [x, y]
-          if ('x' in gameData[1] && 'y' in gameData[1]) {
-            currentPosX = Number(gameData[1].x)
-            currentPosY = Number(gameData[1].y)
-          } else if (Array.isArray(gameData[1])) {
-            currentPosX = Number(gameData[1][0])
-            currentPosY = Number(gameData[1][1])
-          }
-        }
-      }
-
-      let startPosX = 0
-      let startPosY = 0
-      if (gameData[2]) {
-        if (typeof gameData[2] === 'object') {
-          // Could be {x: number, y: number} or [x, y]
-          if ('x' in gameData[2] && 'y' in gameData[2]) {
-            startPosX = Number(gameData[2].x)
-            startPosY = Number(gameData[2].y)
-          } else if (Array.isArray(gameData[2])) {
-            startPosX = Number(gameData[2][0])
-            startPosY = Number(gameData[2][1])
-          }
-        }
-      }
-
-      let endPosX = 0
-      let endPosY = 0
-      if (gameData[3]) {
-        if (typeof gameData[3] === 'object') {
-          // Could be {x: number, y: number} or [x, y]
-          if ('x' in gameData[3] && 'y' in gameData[3]) {
-            endPosX = Number(gameData[3].x)
-            endPosY = Number(gameData[3].y)
-          } else if (Array.isArray(gameData[3])) {
-            endPosX = Number(gameData[3][0])
-            endPosY = Number(gameData[3][1])
-          }
-        }
-      }
-      
       const newGameState = {
         seed: BigInt(gameData[0] as string | number | bigint),
-        currentPos: { x: currentPosX, y: currentPosY },
-        startPos: { x: startPosX, y: startPosY },
-        endPos: { x: endPosX, y: endPosY },
+        currentPos: { x: Number(gameData[1].x), y: Number(gameData[1].y) },
+        startPos: { x: Number(gameData[2].x), y: Number(gameData[2].y) },
+        endPos: { x: Number(gameData[3].x), y: Number(gameData[3].y) },
         pendingReward: BigInt(gameData[4] as string | number | bigint),
         active: gameData[5] as boolean,
         hasShield: gameData[6] as boolean,
@@ -208,59 +154,132 @@ export default function Home() {
         moveCount: Number(gameData[8]),
       }
       
-      // Check for bomb hit: game was active before, now inactive, and pendingReward is 0
-      // Also check if moveCount increased (indicating a move was made)
-      const moveCountIncreased = previousGameState ? newGameState.moveCount > previousGameState.moveCount : false
-      const hadRewardBefore = previousGameState ? previousGameState.pendingReward > 0n : false
+      const prevState = previousGameStateRef.current
       
-      // Detect unshielded bomb: game ended, reward lost, and a move was made
-      // Conditions: game was active, now inactive, reward is 0, had reward before OR made a move, and moveCount increased
-      if (previousGameState?.active && !newGameState.active && newGameState.pendingReward === 0n && (hadRewardBefore || newGameState.moveCount > 0) && moveCountIncreased) {
-        // This indicates a bomb was hit (game ended, reward lost)
+      // ✅ FIX ERROR 1: Only show bomb notification if game ended due to bomb (not due to stopAndClaim)
+      // Use transaction hash tracking instead of isClaimingReward flag to avoid race conditions
+      // If we have a claim tx hash, it means the state change is from stopAndClaim, not a bomb
+      const isFromClaim = claimTxHashRef.current !== null
+      
+      // Only trigger bomb notification if:
+      // 1. Game was active and now inactive
+      // 2. Reward was lost (pendingReward went from >0 to 0)
+      // 3. NOT from a claim transaction (tracked by tx hash)
+      // 4. NOT currently claiming (additional safety check)
+      if (
+        prevState?.active && 
+        !newGameState.active && 
+        newGameState.pendingReward === 0n && 
+        prevState.pendingReward > 0n && 
+        !isFromClaim &&
+        !isClaimingReward
+      ) {
         setBombNotification({ show: true, shielded: false })
-        // Auto-hide notification after 5 seconds
         setTimeout(() => {
           setBombNotification({ show: false, shielded: false })
         }, 5000)
       }
       
-      // Check for shielded bomb hit: game was active, still active, but shield was used
-      // Shield was used if: had shield before, don't have shield now, shield was purchased, and moveCount increased
-      const hadShieldBefore = previousGameState?.hasShield ?? false
-      if (previousGameState?.active && newGameState.active && hadShieldBefore && !newGameState.hasShield && newGameState.shieldPurchased && moveCountIncreased) {
-        // Shield was used to protect from bomb
+      // ✅ FIX ERROR 1: Clear claimTxHashRef immediately after checking, not after 2 seconds
+      // This prevents false bomb notifications if state updates arrive before the timeout
+      if (isFromClaim && !newGameState.active) {
+        // Game ended from claim, clear the ref immediately after we've checked it
+        claimTxHashRef.current = null
+      }
+      
+      // Check for shield activation (shield was used to protect from bomb)
+      // Shield is used when: had shield before, don't have shield now, but shield was purchased
+      // This means shield protected from a bomb and was consumed
+      const hadShieldBefore = prevState?.hasShield ?? false
+      const shieldWasUsed = hadShieldBefore && !newGameState.hasShield && newGameState.shieldPurchased
+      
+      // Show shield notification if shield was used
+      // When shield is used, game continues (active = true), so we check if game is still active
+      // OR if we just had a move transaction (to catch edge cases)
+      if (shieldWasUsed && (newGameState.active || moveTxHashRef.current !== null)) {
         setBombNotification({ show: true, shielded: true })
         setTimeout(() => {
           setBombNotification({ show: false, shielded: false })
         }, 5000)
+        // Clear move tx hash after showing notification
+        if (moveTxHashRef.current !== null) {
+          moveTxHashRef.current = null
+        }
       }
       
       setGameState(newGameState)
-      // Update previous state for next comparison (include all needed fields)
-      setPreviousGameState({
+      gameStateRef.current = newGameState
+      previousGameStateRef.current = {
         active: newGameState.active,
         pendingReward: newGameState.pendingReward,
-        hasShield: newGameState.hasShield,
-        moveCount: newGameState.moveCount
-      })
-    } else {
-      // Reset game state when no game data (game ended or not started)
-      setGameState(null)
-      setPreviousGameState(null)
+        hasShield: newGameState.hasShield
+      }
+    } else if (!isLoadingGame && !isGameError) {
+      // Only reset to null if we're not loading, no error, and there's no data
+      // BUT: Don't reset if we have an active gameState - this prevents reset during refetch
+      // Only reset if gameState is already null (meaning no game was started)
+      // Use ref to check current state without causing re-renders
+      if (gameStateRef.current === null) {
+        // Only reset if gameState was already null (no game exists)
+        setGameState(null)
+        previousGameStateRef.current = null
+        setIsClaimingReward(false)
+      }
+      // If gameStateRef.current is not null, keep the existing state (don't reset during refetch)
     }
-  }, [gameData])
+  }, [gameData, isClaimingReward, stopAndClaimHash, isLoadingGame, isGameError])
 
-  // Refetch move fee and shield price when game becomes active
+  // ✅ FIX ERROR 2: Create a safe refetch function with lock
+  const safeRefetchGame = useCallback(async () => {
+    if (isRefetchingRef.current) {
+      return // Skip if already refetching
+    }
+    try {
+      isRefetchingRef.current = true
+      await refetchGame()
+    } catch (err) {
+      console.warn('Failed to refetch game state:', err)
+    } finally {
+      // Release lock after a short delay to ensure state updates are processed
+      setTimeout(() => {
+        isRefetchingRef.current = false
+      }, 500)
+    }
+  }, [refetchGame])
+
   useEffect(() => {
     if (gameState?.active) {
-      // Small delay to ensure state is updated
-      setTimeout(() => {
+      const timeoutId = setTimeout(() => {
         refetchNextMoveFee()
         refetchShieldPrice()
         refetchCanMove()
       }, 300)
+      return () => clearTimeout(timeoutId)
     }
-  }, [gameState?.active, refetchNextMoveFee, refetchShieldPrice, refetchCanMove])
+  }, [gameState?.active])
+
+  // Poll game state when game is active to prevent desync
+  // Use much longer interval to avoid RPC rate limiting (429 errors)
+  // ✅ FIX ERROR 2: Stop polling when there are pending transactions
+  useEffect(() => {
+    if (!gameState?.active || !address) return
+
+    const intervalId = setInterval(() => {
+      // ✅ FIX ERROR 2: Check for pending transactions inside the interval callback
+      // Don't poll if there are pending transactions
+      const hasPendingTx = isPending || isConfirming || isMoving || isClaiming || isBuyingShield || isApproving || isStartingGame
+      
+      // Only refetch if not currently loading, no recent errors, and no pending transactions
+      if (!isLoadingGame && !isGameError && !hasPendingTx) {
+        safeRefetchGame()
+        refetchCanMove().catch(() => {})
+        refetchNextMoveFee().catch(() => {})
+        refetchShieldPrice().catch(() => {})
+      }
+    }, 15000) // Poll every 15 seconds to avoid RPC rate limiting (429 errors)
+
+    return () => clearInterval(intervalId)
+  }, [gameState?.active, address, safeRefetchGame, refetchCanMove, refetchNextMoveFee, refetchShieldPrice, isLoadingGame, isGameError, isPending, isConfirming, isMoving, isClaiming, isBuyingShield, isApproving, isStartingGame])
 
   useEffect(() => {
     if (balance !== undefined) {
@@ -274,6 +293,7 @@ export default function Home() {
     }
   }, [fee])
 
+  // Read map size from contract
   useEffect(() => {
     if (size !== undefined) {
       setMapSize(Number(size))
@@ -282,156 +302,149 @@ export default function Home() {
 
   useEffect(() => {
     setMounted(true)
+    // Check for dark mode preference
+    if (typeof window !== 'undefined') {
+      const isDark = document.documentElement.classList.contains('dark') || 
+                     window.matchMedia('(prefers-color-scheme: dark)').matches
+      setDarkMode(isDark)
+      if (isDark) {
+        document.documentElement.classList.add('dark')
+      }
+    }
   }, [])
+
+  // Update gameStateRef whenever gameState changes
+  useEffect(() => {
+    gameStateRef.current = gameState
+  }, [gameState])
 
   useEffect(() => {
     if (isSuccess) {
-      refetchGame()
+      safeRefetchGame()
       refetchBalance()
     }
-  }, [isSuccess, refetchGame, refetchBalance])
+  }, [isSuccess, safeRefetchGame, refetchBalance])
 
-  // Refetch after approve succeeds
   useEffect(() => {
     if (isApproveSuccess) {
-      // Small delay to ensure blockchain state is updated
-      setTimeout(() => {
-        refetchGame()
-        refetchBalance()
-        refetchAllowance()
-        refetchCanMove()
-        refetchNextMoveFee()
-        refetchShieldPrice()
+      // Only refetch once to avoid RPC rate limiting
+      const timeoutId1 = setTimeout(() => {
+        if (!isLoadingGame && !isGameError) {
+          refetchBalance().catch(() => {})
+          refetchAllowance().catch(() => {})
+        }
         setApproveHash(undefined)
-      }, 500)
-      
-      // Additional refetch to ensure UI is fully updated
-      setTimeout(() => {
-        refetchGame()
-        refetchBalance()
-        refetchAllowance()
-        refetchCanMove()
-      }, 1500)
+      }, 1000)
+      return () => {
+        clearTimeout(timeoutId1)
+      }
     }
-  }, [isApproveSuccess, refetchGame, refetchBalance, refetchAllowance, refetchCanMove, refetchNextMoveFee, refetchShieldPrice])
+  }, [isApproveSuccess, refetchBalance, refetchAllowance, isLoadingGame, isGameError])
 
-  // Refetch after startGame succeeds
   useEffect(() => {
     if (isStartGameSuccess) {
-      // Reset bomb map when starting new game
       setBombMap(new Set())
-      // Reset previous game state to avoid false bomb detection
-      setPreviousGameState(null)
-      
-      // Small delay to ensure blockchain state is updated
-      setTimeout(() => {
-        refetchGame()
-        refetchBalance()
-        refetchAllowance()
-        refetchCanMove()
-        refetchNextMoveFee()
-        refetchShieldPrice()
+      // Only refetch once to avoid RPC rate limiting
+      const timeoutId1 = setTimeout(() => {
+        if (!isLoadingGame && !isGameError) {
+          safeRefetchGame()
+          refetchBalance().catch(() => {})
+          refetchAllowance().catch(() => {})
+          // ✅ FIX ERROR 3: Refetch canMove after start game transaction to prevent stale data
+          refetchCanMove().catch(() => {})
+          refetchNextMoveFee().catch(() => {})
+          refetchShieldPrice().catch(() => {})
+        }
         setStartGameHash(undefined)
-      }, 500)
-      
-      // Additional refetch after a longer delay to ensure all data is loaded
-      setTimeout(() => {
-        refetchGame()
-        refetchBalance()
-        refetchAllowance()
-        refetchCanMove()
-        refetchNextMoveFee()
-        refetchShieldPrice()
-      }, 1500)
-      
-      // Final refetch to ensure game is fully ready to play
-      setTimeout(() => {
-        refetchGame()
-        refetchCanMove()
-        refetchNextMoveFee()
-        refetchShieldPrice()
-      }, 2500)
+      }, 2000) // Wait 2 seconds for transaction to be fully confirmed
+      return () => {
+        clearTimeout(timeoutId1)
+      }
     }
-  }, [isStartGameSuccess, refetchGame, refetchBalance, refetchAllowance, refetchCanMove, refetchNextMoveFee, refetchShieldPrice])
+  }, [isStartGameSuccess, safeRefetchGame, refetchBalance, refetchAllowance, refetchCanMove, refetchNextMoveFee, refetchShieldPrice, isLoadingGame, isGameError])
 
-  // Refetch after move succeeds
   useEffect(() => {
     if (isMoveSuccess) {
-      // Store current state before refetch to detect bomb hits
+      // Save current shield state before refetch to detect shield usage
       if (gameState) {
-        setPreviousGameState({
+        previousGameStateRef.current = {
           active: gameState.active,
           pendingReward: gameState.pendingReward,
-          hasShield: gameState.hasShield,
-          moveCount: gameState.moveCount
-        })
+          hasShield: gameState.hasShield
+        }
       }
       
-      // Small delay to ensure blockchain state is updated
-      setTimeout(() => {
-        refetchGame()
-        refetchBalance()
-        refetchAllowance()
-        refetchCanMove()
-        refetchNextMoveFee()
-        refetchShieldPrice()
+      // Wait a bit for transaction to be fully confirmed on chain before refetching
+      // Only refetch once to avoid RPC rate limiting
+      const timeoutId1 = setTimeout(() => {
+        if (!isLoadingGame && !isGameError) {
+          // Refetch game state - this will update gameData which will trigger the gameState update
+          safeRefetchGame()
+          refetchBalance().catch(() => {})
+          refetchAllowance().catch(() => {})
+          // ✅ FIX ERROR 3: Refetch canMove after move transaction to prevent stale data
+          refetchCanMove().catch(() => {})
+          refetchNextMoveFee().catch(() => {})
+          refetchShieldPrice().catch(() => {})
+        }
         setMoveHash(undefined)
-      }, 500)
+        // Clear move tx hash after refetch completes (notification will be shown if shield was used)
+        // Note: We don't clear it immediately here because the gameState update effect needs it
+      }, 2000) // Wait 2 seconds for transaction to be fully confirmed
       
-      // Additional refetch to ensure bomb detection works
-      setTimeout(() => {
-        refetchGame()
-      }, 1500)
+      return () => {
+        clearTimeout(timeoutId1)
+      }
     }
-  }, [isMoveSuccess, refetchGame, refetchBalance, refetchAllowance, refetchCanMove, refetchNextMoveFee, refetchShieldPrice])
+  }, [isMoveSuccess, gameState, safeRefetchGame, refetchBalance, refetchAllowance, refetchCanMove, refetchNextMoveFee, refetchShieldPrice, isLoadingGame, isGameError])
 
-  // Refetch after buyShield succeeds
   useEffect(() => {
     if (isBuyShieldSuccess) {
-      // Small delay to ensure blockchain state is updated
-      setTimeout(() => {
-        refetchGame()
-        refetchBalance()
-        refetchAllowance()
-        refetchCanMove()
-        refetchNextMoveFee()
-        refetchShieldPrice()
+      // Only refetch once to avoid RPC rate limiting
+      const timeoutId = setTimeout(() => {
+        if (!isLoadingGame && !isGameError) {
+          safeRefetchGame()
+          refetchBalance().catch(() => {})
+          refetchAllowance().catch(() => {})
+          // ✅ FIX ERROR 3: Refetch canMove after buy shield transaction to prevent stale data
+          refetchCanMove().catch(() => {})
+          refetchNextMoveFee().catch(() => {})
+          refetchShieldPrice().catch(() => {})
+        }
         setBuyShieldHash(undefined)
-      }, 500)
+      }, 2000)
+      return () => clearTimeout(timeoutId)
     }
-  }, [isBuyShieldSuccess, refetchGame, refetchBalance, refetchAllowance, refetchCanMove, refetchNextMoveFee, refetchShieldPrice])
+  }, [isBuyShieldSuccess, safeRefetchGame, refetchBalance, refetchAllowance, refetchCanMove, refetchNextMoveFee, refetchShieldPrice, isLoadingGame, isGameError])
 
-  // Refetch after stopAndClaim succeeds
   useEffect(() => {
     if (isClaimSuccess) {
-      // Small delay to ensure blockchain state is updated
-      setTimeout(() => {
-        refetchGame()
-        refetchBalance()
-        refetchAllowance()
-        refetchCanMove()
-        refetchNextMoveFee()
-        refetchShieldPrice()
+      // Only refetch once to avoid RPC rate limiting
+      const timeoutId1 = setTimeout(() => {
+        if (!isLoadingGame && !isGameError) {
+          safeRefetchGame()
+          refetchBalance().catch(() => {})
+          refetchAllowance().catch(() => {})
+          // ✅ FIX ERROR 3: Refetch canMove after claim transaction to prevent stale data
+          refetchCanMove().catch(() => {})
+          refetchNextMoveFee().catch(() => {})
+          refetchShieldPrice().catch(() => {})
+        }
         setStopAndClaimHash(undefined)
-      }, 500)
-      
-      // Additional refetch to ensure UI is fully updated
-      setTimeout(() => {
-        refetchGame()
-        refetchBalance()
-        refetchAllowance()
-        refetchCanMove()
-        refetchNextMoveFee()
-        refetchShieldPrice()
-      }, 1500)
+        setIsClaimingReward(false)
+        // ✅ FIX ERROR 1: Clear claim tx hash after claim is confirmed
+        // Note: This is a backup clear. The main clear happens in the gameState update effect
+        // when the game becomes inactive, but we also clear here for safety
+        claimTxHashRef.current = null
+      }, 2000)
+      return () => {
+        clearTimeout(timeoutId1)
+      }
     }
-  }, [isClaimSuccess, refetchGame, refetchBalance, refetchAllowance, refetchCanMove, refetchNextMoveFee, refetchShieldPrice])
+  }, [isClaimSuccess, safeRefetchGame, refetchBalance, refetchAllowance, refetchCanMove, refetchNextMoveFee, refetchShieldPrice, isLoadingGame, isGameError])
 
   const handleApprove = () => {
     if (!address || !entryFee) return
-
-    // Approve a large amount upfront to avoid repeated approvals
-    // Approve 1000 USDC (1000 * 1e6) which should be enough for many games
     const approveAmount = parseUnits('1000', 6)
     writeContract(
       {
@@ -453,7 +466,6 @@ export default function Home() {
 
   const handleStartGame = () => {
     if (!address) return
-
     writeContract(
       {
         address: TREASURE_MAP_ADDRESS,
@@ -474,14 +486,11 @@ export default function Home() {
 
   const handleMove = (direction: number) => {
     if (!address || !nextMoveFee) return
-
-    // Check if we need to approve first
     const currentAllowance = allowance as bigint || 0n
     const moveFee = nextMoveFee as bigint
     
     if (currentAllowance < moveFee) {
-      // Approve move fee + some buffer for future moves
-      const approveAmount = moveFee * 10n // Approve 10x to avoid repeated approvals
+      const approveAmount = moveFee * 10n
       writeContract(
         {
           address: USDC_ADDRESS,
@@ -492,10 +501,8 @@ export default function Home() {
         {
           onSuccess: (hash) => {
             setApproveHash(hash)
-            // Wait for approval to be confirmed
             setTimeout(() => {
               refetchAllowance()
-              // Then move after approval
               writeContract(
                 {
                   address: TREASURE_MAP_ADDRESS,
@@ -506,9 +513,12 @@ export default function Home() {
                 {
                   onSuccess: (moveHash) => {
                     setMoveHash(moveHash)
+                    // Track move transaction to detect shield usage
+                    moveTxHashRef.current = moveHash
                   },
                   onError: (error) => {
                     console.error('Error moving:', error)
+                    moveTxHashRef.current = null
                   },
                 }
               )
@@ -522,7 +532,6 @@ export default function Home() {
       return
     }
 
-    // Move
     writeContract(
       {
         address: TREASURE_MAP_ADDRESS,
@@ -533,9 +542,12 @@ export default function Home() {
       {
         onSuccess: (hash) => {
           setMoveHash(hash)
+          // Track move transaction to detect shield usage
+          moveTxHashRef.current = hash
         },
         onError: (error) => {
           console.error('Error moving:', error)
+          moveTxHashRef.current = null
         },
       }
     )
@@ -543,14 +555,11 @@ export default function Home() {
 
   const handleBuyShield = () => {
     if (!address || !shieldPrice) return
-
-    // Check if we need to approve first
     const currentAllowance = allowance as bigint || 0n
     const shieldPriceAmount = shieldPrice as bigint
     
     if (currentAllowance < shieldPriceAmount) {
-      // Approve shield price + some buffer
-      const approveAmount = shieldPriceAmount * 10n // Approve 10x to avoid repeated approvals
+      const approveAmount = shieldPriceAmount * 10n
       writeContract(
         {
           address: USDC_ADDRESS,
@@ -561,10 +570,8 @@ export default function Home() {
         {
           onSuccess: (hash) => {
             setApproveHash(hash)
-            // Wait for approval to be confirmed
             setTimeout(() => {
               refetchAllowance()
-              // Then buy shield after approval
               writeContract(
                 {
                   address: TREASURE_MAP_ADDRESS,
@@ -590,7 +597,6 @@ export default function Home() {
       return
     }
 
-    // Buy shield
     writeContract(
       {
         address: TREASURE_MAP_ADDRESS,
@@ -610,7 +616,7 @@ export default function Home() {
 
   const handleStopAndClaim = () => {
     if (!address) return
-
+    setIsClaimingReward(true)
     writeContract(
       {
         address: TREASURE_MAP_ADDRESS,
@@ -620,165 +626,156 @@ export default function Home() {
       {
         onSuccess: (hash) => {
           setStopAndClaimHash(hash)
+          // ✅ FIX ERROR 1: Track claim tx hash to prevent false bomb notifications
+          claimTxHashRef.current = hash
         },
         onError: (error) => {
           console.error('Error claiming:', error)
+          setIsClaimingReward(false)
+          claimTxHashRef.current = null
         },
       }
     )
   }
 
-  // Calculate cell size dynamically to fit the map without scrolling
-  const cellSize = useMemo(() => {
-    if (!mapSize) return 32
-    // Assuming max available width ~1200px, padding 48px (p-6 * 2), gap between cells 6px (gap-1.5)
-    const maxWidth = 1200
-    const padding = 48
-    const gapSize = 6
-    const availableWidth = maxWidth - padding - (gapSize * (mapSize - 1))
-    // Minimum 20px, maximum 40px for better visibility
-    return Math.max(20, Math.min(40, Math.floor(availableWidth / mapSize)))
-  }, [mapSize])
+  const toggleDarkMode = () => {
+    const newDarkMode = !darkMode
+    setDarkMode(newDarkMode)
+    if (typeof document !== 'undefined') {
+      document.documentElement.classList.toggle('dark')
+    }
+  }
 
   const renderMap = () => {
     if (!gameState || !mapSize) return null
 
-    // Ensure endPos is valid (check if it exists and has valid coordinates)
-    // Note: x and y can be 0, so we check for null/undefined differently
-    const endPosValid = gameState.endPos != null && 
-        typeof gameState.endPos.x === 'number' && 
-        typeof gameState.endPos.y === 'number' &&
-        !isNaN(gameState.endPos.x) &&
-        !isNaN(gameState.endPos.y) &&
-        gameState.endPos.x >= 0 && 
-        gameState.endPos.y >= 0 &&
-        gameState.endPos.x < mapSize && 
-        gameState.endPos.y < mapSize
+    if (gameState.endPos.x === undefined || gameState.endPos.y === undefined) {
+      return null
+    }
 
-    const grid = []
+    const cells = []
     for (let y = mapSize - 1; y >= 0; y--) {
-      const row = []
       for (let x = 0; x < mapSize; x++) {
         const isCurrent = x === gameState.currentPos.x && y === gameState.currentPos.y
         const isStart = x === gameState.startPos.x && y === gameState.startPos.y
-        // Check isEnd - always try to show treasure if endPos exists and has numeric values
-        const isEnd = gameState.endPos != null && 
-          typeof gameState.endPos.x === 'number' && 
-          typeof gameState.endPos.y === 'number' &&
-          !isNaN(gameState.endPos.x) &&
-          !isNaN(gameState.endPos.y) &&
-          x === gameState.endPos.x && 
-          y === gameState.endPos.y
-        const isVisited = false // Could track visited positions
+        const isEnd = x === gameState.endPos.x && y === gameState.endPos.y
         const hasBomb = bombMap.has(`${x},${y}`)
 
-        let bgColor = 'bg-slate-800/50 hover:bg-slate-700/50'
-        let content = ''
-        let borderColor = 'border-slate-600/30'
+        let bgColor = 'bg-gray-200 dark:bg-white/5'
+        let borderColor = 'border-transparent hover:border-white/20'
+        let content = null
         
-        // Priority: Current > End > Start > Bomb > Visited
-        // This ensures treasure is always visible even if it overlaps with start
         if (isCurrent && isEnd) {
-          // Current position is also end position (treasure reached)
-          bgColor = 'bg-gradient-to-br from-purple-500 to-pink-500 animate-pulse shadow-lg shadow-purple-500/50'
-          content = '🏆📍'
-          borderColor = 'border-purple-400'
+          bgColor = 'bg-accent-yellow/20 border-accent-yellow'
+          borderColor = 'border-accent-yellow'
+          content = (
+            <div className="w-2 h-2 sm:w-3 sm:h-3 rounded-full bg-accent-yellow animate-ping absolute"></div>
+          )
         } else if (isCurrent && isStart) {
-          // Current position is also start position (just started)
-          bgColor = 'bg-gradient-to-br from-emerald-500 to-green-500 animate-pulse shadow-lg shadow-emerald-500/50'
-          content = '🚩📍'
-          borderColor = 'border-emerald-400'
+          bgColor = 'bg-green-500/20 border-green-500'
+          borderColor = 'border-green-500'
+          content = <span className="material-icons-round text-green-500 text-xs sm:text-base">flag</span>
         } else if (isCurrent) {
-          bgColor = 'bg-gradient-to-br from-yellow-400 to-amber-500 animate-pulse shadow-lg shadow-yellow-500/50'
-          content = '📍'
-          borderColor = 'border-yellow-400'
+          bgColor = 'bg-accent-yellow/20 border-accent-yellow'
+          borderColor = 'border-accent-yellow'
+          content = (
+            <>
+              <div className="w-2 h-2 sm:w-3 sm:h-3 rounded-full bg-accent-yellow animate-ping absolute"></div>
+              <div className="w-2 h-2 sm:w-3 sm:h-3 rounded-full bg-accent-yellow relative z-10"></div>
+            </>
+          )
         } else if (isEnd) {
-          // Always show treasure, even if it's at start position (shouldn't happen but just in case)
-          bgColor = 'bg-gradient-to-br from-purple-600 to-pink-600 shadow-md shadow-purple-500/30'
-          content = '🏆'
-          borderColor = 'border-purple-400'
+          bgColor = 'bg-accent-pink/20 border-accent-pink'
+          borderColor = 'border-accent-pink'
+          content = <span className="material-icons-round text-accent-pink text-xs sm:text-base">emoji_events</span>
         } else if (isStart) {
-          bgColor = 'bg-gradient-to-br from-emerald-600 to-green-600 shadow-md shadow-emerald-500/30'
-          content = '🚩'
-          borderColor = 'border-emerald-400'
+          bgColor = 'bg-green-500/20 border-green-500'
+          borderColor = 'border-green-500'
+          content = <span className="material-icons-round text-green-500 text-xs sm:text-base">flag</span>
         } else if (hasBomb) {
-          bgColor = 'bg-gradient-to-br from-red-600 to-rose-700 shadow-md shadow-red-500/30'
-          content = '💣'
-          borderColor = 'border-red-400'
-        } else if (isVisited) {
-          bgColor = 'bg-slate-700/50'
-          content = '✓'
-          borderColor = 'border-slate-500/30'
+          bgColor = 'bg-accent-red/20 border-accent-red'
+          borderColor = 'border-accent-red'
+          content = <span className="material-icons-round text-accent-red text-xs sm:text-base">dangerous</span>
         }
 
-        row.push(
+        cells.push(
           <div
             key={`${x}-${y}`}
-            className={`${bgColor} rounded-lg border-2 ${borderColor} flex items-center justify-center text-xs font-bold transition-all duration-200 cursor-pointer transform hover:scale-110`}
-            style={{ 
-              width: `${cellSize}px`, 
-              height: `${cellSize}px`,
-              minWidth: `${cellSize}px`,
-              minHeight: `${cellSize}px`
-            }}
+            className={`grid-cell ${bgColor} rounded-sm sm:rounded-md border ${borderColor} flex items-center justify-center relative aspect-square`}
             title={`${x}, ${y}${isEnd ? ' (Treasure)' : ''}${isStart ? ' (Start)' : ''}${isCurrent ? ' (Current)' : ''}`}
           >
             {content}
           </div>
         )
       }
-      grid.push(
-        <div key={y} className="flex gap-1.5">
-          {row}
-        </div>
-      )
     }
 
     return (
-      <div className="flex flex-col gap-1.5 p-6 bg-slate-900/80 backdrop-blur-xl rounded-2xl border-2 border-cyan-500/30 shadow-2xl shadow-cyan-500/20 w-full flex-wrap justify-center">
-        {grid}
+      <div className="grid grid-cols-10 gap-1 sm:gap-2 w-full" style={{ 
+        gridTemplateColumns: 'repeat(10, minmax(0, 1fr))',
+        aspectRatio: '1 / 1'
+      }}>
+        {cells}
       </div>
     )
   }
 
   if (!mounted) {
-    return (
-      <main className="min-h-screen bg-gradient-to-br from-slate-900 via-purple-900 to-slate-900 p-8 relative overflow-hidden">
-        <div className="absolute inset-0 bg-[url('data:image/svg+xml;base64,PHN2ZyB3aWR0aD0iNjAiIGhlaWdodD0iNjAiIHZpZXdCb3g9IjAgMCA2MCA2MCIgeG1sbnM9Imh0dHA6Ly93d3cudzMub3JnLzIwMDAvc3ZnIj48ZyBmaWxsPSJub25lIiBmaWxsLXJ1bGU9ImV2ZW5vZGQiPjxwYXRoIGQ9Ik0zNiAxOGMzLjMxNCAwIDYgMi42ODYgNiA2cy0yLjY4NiA2LTYgNi02LTIuNjg2LTYtNiAyLjY4Ni02IDYtNnptLTEyIDEyYzMuMzE0IDAgNiAyLjY4NiA2IDZzLTIuNjg2IDYtNiA2LTYtMi42ODYtNi02IDIuNjg2LTYgNi02eiIgc3Ryb2tlPSJyZ2JhKDEzOSwgOTIsIDI0NiwgMC4xKSIvPjwvZz48L3N2Zz4=')] opacity-20"></div>
-        <div className="max-w-7xl mx-auto relative z-10">
-          <div className="flex justify-between items-center mb-12">
-            <div className="space-y-2">
-              <Logo size="xl" showText={true} />
-              <p className="text-xl text-cyan-300 font-semibold tracking-wide">Epic 2D Grid Adventure • Bombs • Shields • Glory</p>
-            </div>
-            <ConnectButton />
-          </div>
-          <div className="bg-gradient-to-br from-slate-800/90 to-purple-900/90 backdrop-blur-2xl rounded-3xl p-12 text-center border-2 border-purple-500/30 shadow-2xl shadow-purple-500/50">
-            <div className="animate-spin rounded-full h-16 w-16 border-t-4 border-b-4 border-cyan-400 mx-auto mb-6"></div>
-            <p className="text-white text-2xl font-bold">Loading Adventure...</p>
-          </div>
-        </div>
-      </main>
-    )
+    return null
   }
 
-  return (
-    <main className="min-h-screen bg-gradient-to-br from-slate-900 via-purple-900 to-slate-900 p-8 relative overflow-hidden">
-      <div className="absolute inset-0 bg-[url('data:image/svg+xml;base64,PHN2ZyB3aWR0aD0iNjAiIGhlaWdodD0iNjAiIHZpZXdCb3g9IjAgMCA2MCA2MCIgeG1sbnM9Imh0dHA6Ly93d3cudzMub3JnLzIwMDAvc3ZnIj48ZyBmaWxsPSJub25lIiBmaWxsLXJ1bGU9ImV2ZW5vZGQiPjxwYXRoIGQ9Ik0zNiAxOGMzLjMxNCAwIDYgMi42ODYgNiA2cy0yLjY4NiA2LTYgNi02LTIuNjg2LTYtNiAyLjY4Ni02IDYtNnptLTEyIDEyYzMuMzE0IDAgNiAyLjY4NiA2IDZzLTIuNjg2IDYtNiA2LTYtMi42ODYtNi02IDIuNjg2LTYgNi02eiIgc3Ryb2tlPSJyZ2JhKDEzOSwgOTIsIDI0NiwgMC4xKSIvPjwvZz48L3N2Zz4=')] opacity-20"></div>
-      
-      <div className="max-w-7xl mx-auto relative z-10">
-        {/* Header */}
-        <div className="flex justify-between items-center mb-12">
-          <div className="space-y-2">
-            <Logo size="xl" showText={true} className="animate-pulse" />
-            <p className="text-xl text-cyan-300 font-semibold tracking-wide">Epic 2D Grid Adventure • Bombs • Shields • Glory</p>
-          </div>
-          <ConnectButton />
-        </div>
+  const shortAddress = address ? `${address.slice(0, 4)}...${address.slice(-4)}` : ''
 
-        {/* Bomb Hit Notification */}
+  return (
+    <div className="bg-background-light dark:bg-background-dark text-slate-800 dark:text-gray-100 font-sans min-h-screen transition-colors duration-300 antialiased selection:bg-primary selection:text-white">
+      <header className="sticky top-0 z-50 backdrop-blur-md bg-white/80 dark:bg-background-dark/80 border-b border-gray-200 dark:border-white/10">
+        <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 h-20 flex items-center justify-between">
+          <div className="flex items-center gap-4">
+            <div className="w-12 h-12 rounded-lg bg-gradient-to-br from-primary to-accent-cyan flex items-center justify-center shadow-lg transform rotate-3 hover:rotate-0 transition-transform">
+              <span className="material-icons-round text-white text-3xl">grid_on</span>
+            </div>
+            <div>
+              <h1 className="font-display font-black text-2xl tracking-wider text-transparent bg-clip-text bg-gradient-to-r from-primary to-accent-cyan uppercase">
+                Treasure Trail
+              </h1>
+              <p className="text-xs font-medium text-gray-500 dark:text-gray-400 tracking-wide hidden sm:block">
+                Epic 2D Grid Adventure • Bombs • Shields • Glory
+              </p>
+            </div>
+          </div>
+          <div className="flex items-center gap-3">
+            <div className="hidden md:flex flex-col items-end text-right mr-2">
+              <span className="text-xs text-gray-500 dark:text-gray-400 font-mono">Network: Arc</span>
+              <span className="text-xs font-bold text-green-600 dark:text-green-400 flex items-center gap-1">
+                <span className="w-2 h-2 rounded-full bg-green-500 animate-pulse"></span> Connected
+              </span>
+            </div>
+            {isConnected ? (
+              <div className="bg-surface-light dark:bg-surface-dark border border-gray-200 dark:border-white/10 hover:border-primary dark:hover:border-primary rounded-full px-4 py-2 flex items-center gap-2 transition-all shadow-sm hover:shadow-md group">
+                <div className="w-6 h-6 rounded-full bg-gray-100 dark:bg-white/10 flex items-center justify-center group-hover:bg-primary/20">
+                  <span className="material-icons-round text-sm text-gray-600 dark:text-gray-300">account_balance_wallet</span>
+                </div>
+                <span className="text-sm font-bold font-mono">{formatUnits(usdcBalance, 6)} USDC</span>
+                <span className="text-xs text-gray-400 dark:text-gray-500 font-mono pl-2 border-l border-gray-200 dark:border-white/10">{shortAddress}</span>
+              </div>
+            ) : (
+              <ConnectButton />
+            )}
+            <button 
+              className="p-2 rounded-full hover:bg-gray-200 dark:hover:bg-white/10 text-gray-500 dark:text-gray-400 transition-colors" 
+              onClick={toggleDarkMode}
+            >
+              <span className="material-icons-round dark:hidden">dark_mode</span>
+              <span className="material-icons-round hidden dark:block">light_mode</span>
+            </button>
+          </div>
+        </div>
+      </header>
+
+      <main className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-8 space-y-8">
+        {/* Bomb Notification */}
         {bombNotification.show && (
-          <div className={`fixed top-4 left-1/2 transform -translate-x-1/2 z-50 animate-bounce ${bombNotification.shielded ? 'bg-gradient-to-r from-indigo-600 to-purple-600' : 'bg-gradient-to-r from-red-600 to-rose-600'} text-white font-black py-6 px-8 rounded-2xl shadow-2xl border-4 ${bombNotification.shielded ? 'border-indigo-400' : 'border-red-400'} max-w-md`}>
+          <div className={`fixed top-24 left-1/2 transform -translate-x-1/2 z-50 animate-bounce ${bombNotification.shielded ? 'bg-gradient-to-r from-indigo-600 to-purple-600' : 'bg-gradient-to-r from-red-600 to-rose-600'} text-white font-black py-6 px-8 rounded-2xl shadow-2xl border-4 ${bombNotification.shielded ? 'border-indigo-400' : 'border-red-400'} max-w-md`}>
             <div className="flex items-center gap-4">
               <span className="text-4xl">{bombNotification.shielded ? '🛡️' : '💣'}</span>
               <div>
@@ -790,256 +787,370 @@ export default function Home() {
         )}
 
         {!isConnected ? (
-          <div className="bg-gradient-to-br from-slate-800/90 to-purple-900/90 backdrop-blur-2xl rounded-3xl p-12 text-center border-2 border-purple-500/30 shadow-2xl shadow-purple-500/50">
+          <div className="bg-surface-light dark:bg-surface-dark p-12 rounded-2xl border border-gray-200 dark:border-white/10 shadow-lg text-center">
             <div className="text-8xl mb-6 animate-bounce">🎮</div>
-            <h2 className="text-4xl font-bold text-white mb-4">Ready to Begin Your Adventure?</h2>
-            <p className="text-xl text-cyan-300 mb-6">Connect your wallet to start the ultimate treasure hunt!</p>
-            <p className="text-lg text-purple-300 max-w-2xl mx-auto">Navigate a mysterious grid, dodge deadly bombs, collect massive rewards, and claim the legendary treasure!</p>
+            <h2 className="text-4xl font-bold mb-4">Ready to Begin Your Adventure?</h2>
+            <p className="text-xl mb-6">Connect your wallet to start the ultimate treasure hunt!</p>
+            <ConnectButton />
           </div>
         ) : (
-          <div className="space-y-6">
-            {/* Info Panel */}
-            <div className="bg-gradient-to-br from-slate-800/90 to-slate-900/90 backdrop-blur-2xl rounded-3xl p-8 border-2 border-cyan-500/30 shadow-2xl shadow-cyan-500/20">
-              <h2 className="text-3xl font-black text-transparent bg-clip-text bg-gradient-to-r from-cyan-400 to-purple-400 mb-6">📊 GAME STATS</h2>
-              <div className="grid grid-cols-2 md:grid-cols-4 gap-6">
-                <div className="bg-slate-900/50 rounded-2xl p-5 border-2 border-purple-500/30 hover:border-purple-400/50 transition-all">
-                  <p className="text-cyan-400 text-sm font-bold uppercase tracking-wider mb-2">Position</p>
-                  <p className="text-white text-3xl font-black">
+          <>
+            {/* Game Stats */}
+            <section aria-label="Game Statistics">
+              <div className="flex items-center gap-2 mb-4">
+                <span className="material-icons-round text-primary">analytics</span>
+                <h2 className="font-display font-bold text-lg uppercase tracking-wide">Game Stats</h2>
+              </div>
+              <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-6 gap-4">
+                <div className="bg-surface-light dark:bg-surface-dark p-4 rounded-xl border border-gray-200 dark:border-white/5 shadow-sm hover:border-primary/50 transition-colors relative overflow-hidden group">
+                  <div className="absolute top-0 right-0 p-2 opacity-10 group-hover:opacity-20 transition-opacity">
+                    <span className="material-icons-round text-4xl">my_location</span>
+                  </div>
+                  <p className="text-[10px] font-bold uppercase text-gray-500 dark:text-gray-400 tracking-wider mb-1">Position</p>
+                  <p className="font-mono text-2xl font-bold text-primary">
                     ({gameState?.currentPos.x ?? 0}, {gameState?.currentPos.y ?? 0})
                   </p>
                 </div>
-                <div className="bg-slate-900/50 rounded-2xl p-5 border-2 border-green-500/30 hover:border-green-400/50 transition-all">
-                  <p className="text-cyan-400 text-sm font-bold uppercase tracking-wider mb-2">Pending Reward</p>
-                  <p className="text-green-400 text-3xl font-black">
-                    {gameState?.pendingReward
-                      ? formatUnits(gameState.pendingReward, 6)
-                      : '0'}{' '}
-                    <span className="text-lg">USDC</span>
+                <div className="bg-surface-light dark:bg-surface-dark p-4 rounded-xl border border-gray-200 dark:border-white/5 shadow-sm hover:border-green-500/50 transition-colors relative overflow-hidden group">
+                  <div className="absolute top-0 right-0 p-2 opacity-10 group-hover:opacity-20 transition-opacity">
+                    <span className="material-icons-round text-green-500 text-4xl">savings</span>
+                  </div>
+                  <p className="text-[10px] font-bold uppercase text-gray-500 dark:text-gray-400 tracking-wider mb-1">Pending Reward</p>
+                  <p className="font-mono text-2xl font-bold text-green-600 dark:text-green-400">
+                    {gameState?.pendingReward ? formatUnits(gameState.pendingReward, 6) : '0'} <span className="text-xs align-top opacity-70">USDC</span>
                   </p>
                 </div>
-                <div className="bg-slate-900/50 rounded-2xl p-5 border-2 border-amber-500/30 hover:border-amber-400/50 transition-all">
-                  <p className="text-cyan-400 text-sm font-bold uppercase tracking-wider mb-2">Total Moves</p>
-                  <p className="text-amber-400 text-3xl font-black">{gameState?.moveCount ?? 0}</p>
+                <div className="bg-surface-light dark:bg-surface-dark p-4 rounded-xl border border-gray-200 dark:border-white/5 shadow-sm hover:border-accent-yellow/50 transition-colors relative overflow-hidden group">
+                  <div className="absolute top-0 right-0 p-2 opacity-10 group-hover:opacity-20 transition-opacity">
+                    <span className="material-icons-round text-accent-yellow text-4xl">history</span>
+                  </div>
+                  <p className="text-[10px] font-bold uppercase text-gray-500 dark:text-gray-400 tracking-wider mb-1">Total Moves</p>
+                  <p className="font-mono text-2xl font-bold text-accent-yellow">{gameState?.moveCount ?? 0}</p>
                 </div>
-                <div className="bg-slate-900/50 rounded-2xl p-5 border-2 border-blue-500/30 hover:border-blue-400/50 transition-all">
-                  <p className="text-cyan-400 text-sm font-bold uppercase tracking-wider mb-2">Your Balance</p>
-                  <p className="text-blue-400 text-3xl font-black">
-                    {formatUnits(usdcBalance, 6)} <span className="text-lg">USDC</span>
+                <div className="bg-surface-light dark:bg-surface-dark p-4 rounded-xl border border-gray-200 dark:border-white/5 shadow-sm hover:border-blue-500/50 transition-colors relative overflow-hidden group lg:col-span-2">
+                  <div className="absolute top-0 right-0 p-2 opacity-10 group-hover:opacity-20 transition-opacity">
+                    <span className="material-icons-round text-blue-500 text-4xl">account_balance</span>
+                  </div>
+                  <p className="text-[10px] font-bold uppercase text-gray-500 dark:text-gray-400 tracking-wider mb-1">Your Balance</p>
+                  <p className="font-mono text-2xl font-bold text-blue-600 dark:text-blue-400 truncate">
+                    {formatUnits(usdcBalance, 6)} <span className="text-xs align-top opacity-70">USDC</span>
                   </p>
+                </div>
+                <div className="bg-surface-light dark:bg-surface-dark p-4 rounded-xl border border-gray-200 dark:border-white/5 shadow-sm hover:border-red-500/50 transition-colors relative overflow-hidden group">
+                  <div className="absolute top-0 right-0 p-2 opacity-10 group-hover:opacity-20 transition-opacity">
+                    <span className="material-icons-round text-red-500 text-4xl">gpp_bad</span>
+                  </div>
+                  <p className="text-[10px] font-bold uppercase text-gray-500 dark:text-gray-400 tracking-wider mb-1">Shield Status</p>
+                  <div className="flex items-center gap-1 text-red-500 font-bold">
+                    {gameState?.hasShield ? (
+                      <>
+                        <span className="material-icons-round text-sm">shield</span>
+                        <span>ACTIVE</span>
+                      </>
+                    ) : gameState?.shieldPurchased ? (
+                      <>
+                        <span className="material-icons-round text-sm">shield</span>
+                        <span>USED</span>
+                      </>
+                    ) : (
+                      <>
+                        <span className="material-icons-round text-sm">close</span>
+                        <span>NONE</span>
+                      </>
+                    )}
+                  </div>
                 </div>
               </div>
-              <div className="mt-6 grid grid-cols-2 gap-6">
-                <div className="bg-slate-900/50 rounded-2xl p-5 border-2 border-indigo-500/30 hover:border-indigo-400/50 transition-all">
-                  <p className="text-cyan-400 text-sm font-bold uppercase tracking-wider mb-2">Shield Status</p>
-                  <p className="text-white text-2xl font-black">
-                    {gameState?.hasShield ? '🛡️ ACTIVE' : gameState?.shieldPurchased ? '🛡️ USED' : '❌ NONE'}
-                  </p>
-                </div>
-                <div className="bg-slate-900/50 rounded-2xl p-5 border-2 border-rose-500/30 hover:border-rose-400/50 transition-all">
-                  <p className="text-cyan-400 text-sm font-bold uppercase tracking-wider mb-2">Next Move Fee</p>
-<p className="text-rose-400 text-2xl font-black">
-{nextMoveFee ? formatUnits(nextMoveFee as bigint, 6) : '0'} <span className="text-lg">USDC</span>
-</p>
-</div>
-</div>
-</div>
-        {/* Map Visualization */}
-        <div className="bg-gradient-to-br from-slate-800/90 to-slate-900/90 backdrop-blur-2xl rounded-3xl p-8 border-2 border-purple-500/30 shadow-2xl shadow-purple-500/20">
-          <div className="flex justify-between items-center mb-6">
-            <h2 className="text-3xl font-black text-transparent bg-clip-text bg-gradient-to-r from-purple-400 to-pink-400">
-              🗺️ ADVENTURE MAP ({mapSize}x{mapSize})
-            </h2>
-            {gameState?.endPos && (
-              <div className="text-sm text-purple-300">
-                Treasure at: ({gameState.endPos.x}, {gameState.endPos.y})
-              </div>
-            )}
-          </div>
-          {renderMap() || (
-            <div className="text-center text-gray-400 py-12">
-              {!gameState ? 'Start a game to see the map!' : 'Loading map...'}
-            </div>
-          )}
-          <div className="mt-6 flex flex-wrap gap-6 justify-center">
-            <div className="flex items-center gap-3 bg-slate-900/70 px-4 py-2 rounded-xl border border-emerald-500/30">
-              <div className="w-6 h-6 bg-gradient-to-br from-emerald-600 to-green-600 rounded-lg shadow-lg"></div>
-              <span className="text-emerald-300 font-bold">START</span>
-            </div>
-            <div className="flex items-center gap-3 bg-slate-900/70 px-4 py-2 rounded-xl border border-yellow-500/30">
-              <div className="w-6 h-6 bg-gradient-to-br from-yellow-400 to-amber-500 rounded-lg shadow-lg"></div>
-              <span className="text-yellow-300 font-bold">CURRENT</span>
-            </div>
-            <div className="flex items-center gap-3 bg-slate-900/70 px-4 py-2 rounded-xl border border-purple-500/30">
-              <div className="w-6 h-6 bg-gradient-to-br from-purple-600 to-pink-600 rounded-lg shadow-lg"></div>
-              <span className="text-purple-300 font-bold">TREASURE</span>
-            </div>
-            <div className="flex items-center gap-3 bg-slate-900/70 px-4 py-2 rounded-xl border border-red-500/30">
-              <div className="w-6 h-6 bg-gradient-to-br from-red-600 to-rose-700 rounded-lg shadow-lg"></div>
-              <span className="text-red-300 font-bold">BOMB</span>
-            </div>
-            <div className="flex items-center gap-3 bg-slate-900/70 px-4 py-2 rounded-xl border border-slate-500/30">
-              <div className="w-6 h-6 bg-slate-800/50 rounded-lg"></div>
-              <span className="text-slate-300 font-bold">UNEXPLORED</span>
-            </div>
-          </div>
-        </div>
+            </section>
 
-        {/* Movement Controls */}
-        {gameState?.active && (
-          <div className="bg-gradient-to-br from-slate-800/90 to-slate-900/90 backdrop-blur-2xl rounded-3xl p-8 border-2 border-cyan-500/30 shadow-2xl shadow-cyan-500/20">
-            <h2 className="text-3xl font-black text-transparent bg-clip-text bg-gradient-to-r from-cyan-400 to-blue-400 mb-6 text-center">
-              🎮 MOVEMENT CONTROLS
-            </h2>
-            <div className="flex flex-col items-center gap-4">
-              <button
-                onClick={() => handleMove(Direction.Up)}
-                disabled={isPending || isConfirming || isMoving || isApproving || !canMove || gameState.currentPos.y >= mapSize - 1}
-                className="w-24 h-24 bg-gradient-to-br from-cyan-500 to-blue-600 hover:from-cyan-400 hover:to-blue-500 disabled:opacity-30 disabled:cursor-not-allowed text-white font-black text-lg rounded-2xl transition-all transform hover:scale-110 active:scale-95 shadow-2xl shadow-cyan-500/50 border-2 border-cyan-400/50"
-              >
-                {isMoving || isApproving ? '⏳' : '↑ UP'}
-              </button>
-              <div className="flex gap-4">
-                <button
-                  onClick={() => handleMove(Direction.Left)}
-                  disabled={isPending || isConfirming || isMoving || isApproving || !canMove || gameState.currentPos.x === 0}
-                  className="w-24 h-24 bg-gradient-to-br from-cyan-500 to-blue-600 hover:from-cyan-400 hover:to-blue-500 disabled:opacity-30 disabled:cursor-not-allowed text-white font-black text-lg rounded-2xl transition-all transform hover:scale-110 active:scale-95 shadow-2xl shadow-cyan-500/50 border-2 border-cyan-400/50"
-                >
-                  {isMoving || isApproving ? '⏳' : '← LEFT'}
-                </button>
-                <button
-                  onClick={() => handleMove(Direction.Right)}
-                  disabled={isPending || isConfirming || isMoving || isApproving || !canMove || gameState.currentPos.x >= mapSize - 1}
-                  className="w-24 h-24 bg-gradient-to-br from-cyan-500 to-blue-600 hover:from-cyan-400 hover:to-blue-500 disabled:opacity-30 disabled:cursor-not-allowed text-white font-black text-lg rounded-2xl transition-all transform hover:scale-110 active:scale-95 shadow-2xl shadow-cyan-500/50 border-2 border-cyan-400/50"
-                >
-                  {isMoving || isApproving ? '⏳' : 'RIGHT →'}
-                </button>
+            <div className="grid grid-cols-1 lg:grid-cols-12 gap-8">
+              {/* Map Section */}
+              <div className="lg:col-span-8 flex flex-col gap-4">
+                <div className="flex items-center justify-between">
+                  <div className="flex items-center gap-2">
+                    <span className="material-icons-round text-accent-pink">map</span>
+                    <h2 className="font-display font-bold text-lg uppercase tracking-wide">Adventure Map (10x10)</h2>
+                  </div>
+                  {gameState?.endPos && (
+                    <span className="text-xs font-mono text-gray-500">
+                      Treasure at: ({gameState.endPos.x}, {gameState.endPos.y})
+                    </span>
+                  )}
+                </div>
+                <div className="bg-surface-light dark:bg-surface-dark p-2 sm:p-4 rounded-2xl border border-gray-200 dark:border-white/10 shadow-xl relative overflow-hidden flex items-center justify-center">
+                  <div className="absolute inset-0 opacity-5 pointer-events-none" style={{backgroundImage: 'radial-gradient(#7c3aed 1px, transparent 1px)', backgroundSize: '20px 20px'}}></div>
+                  <div className="w-full" style={{ aspectRatio: '1 / 1' }}>
+                    {renderMap()}
+                  </div>
+                </div>
+                <div className="flex flex-wrap justify-center gap-4 py-2">
+                  <div className="flex items-center gap-2">
+                    <div className="w-3 h-3 rounded-sm bg-green-500"></div>
+                    <span className="text-xs uppercase font-bold text-gray-500 dark:text-gray-400">Start</span>
+                  </div>
+                  <div className="flex items-center gap-2">
+                    <div className="w-3 h-3 rounded-sm bg-accent-yellow"></div>
+                    <span className="text-xs uppercase font-bold text-gray-500 dark:text-gray-400">Current</span>
+                  </div>
+                  <div className="flex items-center gap-2">
+                    <div className="w-3 h-3 rounded-sm bg-accent-pink"></div>
+                    <span className="text-xs uppercase font-bold text-gray-500 dark:text-gray-400">Treasure</span>
+                  </div>
+                  <div className="flex items-center gap-2">
+                    <div className="w-3 h-3 rounded-sm bg-red-500"></div>
+                    <span className="text-xs uppercase font-bold text-gray-500 dark:text-gray-400">Bomb</span>
+                  </div>
+                  <div className="flex items-center gap-2">
+                    <div className="w-3 h-3 rounded-sm bg-gray-300 dark:bg-slate-700"></div>
+                    <span className="text-xs uppercase font-bold text-gray-500 dark:text-gray-400">Unexplored</span>
+                  </div>
+                </div>
               </div>
-              <button
-                onClick={() => handleMove(Direction.Down)}
-                disabled={isPending || isConfirming || isMoving || isApproving || !canMove || gameState.currentPos.y === 0}
-                className="w-24 h-24 bg-gradient-to-br from-cyan-500 to-blue-600 hover:from-cyan-400 hover:to-blue-500 disabled:opacity-30 disabled:cursor-not-allowed text-white font-black text-lg rounded-2xl transition-all transform hover:scale-110 active:scale-95 shadow-2xl shadow-cyan-500/50 border-2 border-cyan-400/50"
-              >
-                {isMoving || isApproving ? '⏳' : '↓ DOWN'}
-              </button>
+
+              {/* Controls and Actions */}
+              <div className="lg:col-span-4 flex flex-col gap-8 lg:mt-[3.5rem]">
+                {/* Next Move Price Card */}
+                {gameState?.active && (
+                  <div className="bg-surface-light dark:bg-surface-dark p-4 rounded-xl border border-gray-200 dark:border-white/10 shadow-sm">
+                    <div className="flex items-center justify-between">
+                      <div className="flex items-center gap-3">
+                        <div className="w-10 h-10 rounded-lg bg-blue-500/20 flex items-center justify-center">
+                          <span className="material-icons-round text-blue-500 text-lg">payments</span>
+                        </div>
+                        <div>
+                          <p className="text-[10px] font-bold uppercase text-gray-500 dark:text-gray-400 tracking-wider">Next Move Price</p>
+                          <p className="font-mono text-xl font-bold text-blue-600 dark:text-blue-400">
+                            {nextMoveFee ? formatUnits(nextMoveFee as bigint, 6) : '...'} <span className="text-xs align-top opacity-70">USDC</span>
+                          </p>
+                        </div>
+                      </div>
+                    </div>
+                  </div>
+                )}
+
+                {/* Controls */}
+                {gameState?.active && (
+                  <div className="bg-surface-light dark:bg-surface-dark p-6 rounded-2xl border border-gray-200 dark:border-white/10 shadow-lg flex flex-col items-center justify-center min-h-[300px]">
+                    <div className="flex items-center gap-2 mb-6 w-full">
+                      <span className="material-icons-round text-accent-cyan">gamepad</span>
+                      <h2 className="font-display font-bold text-lg uppercase tracking-wide">Controls</h2>
+                    </div>
+                    <div className="relative w-48 h-48">
+                      <button
+                        onClick={() => handleMove(Direction.Up)}
+                        disabled={!gameState?.active || isPending || isConfirming || isMoving || isApproving || !canMove || gameState.currentPos.y >= mapSize - 1}
+                        className="absolute top-0 left-1/2 -translate-x-1/2 w-14 h-14 bg-gradient-to-t from-blue-600 to-blue-500 rounded-lg shadow-lg border-b-4 border-blue-800 active:border-b-0 active:translate-y-1 transition-all flex items-center justify-center group z-10 disabled:opacity-30 disabled:cursor-not-allowed"
+                      >
+                        <span className="material-icons-round text-white font-bold group-hover:scale-110 transition-transform">arrow_upward</span>
+                      </button>
+                      <button
+                        onClick={() => handleMove(Direction.Left)}
+                        disabled={!gameState?.active || isPending || isConfirming || isMoving || isApproving || !canMove || gameState.currentPos.x === 0}
+                        className="absolute top-1/2 left-0 -translate-y-1/2 w-14 h-14 bg-gradient-to-t from-blue-600 to-blue-500 rounded-lg shadow-lg border-b-4 border-blue-800 active:border-b-0 active:translate-y-1 transition-all flex items-center justify-center group z-10 disabled:opacity-30 disabled:cursor-not-allowed"
+                      >
+                        <span className="material-icons-round text-white font-bold group-hover:scale-110 transition-transform">arrow_back</span>
+                      </button>
+                      <button
+                        onClick={() => handleMove(Direction.Right)}
+                        disabled={!gameState?.active || isPending || isConfirming || isMoving || isApproving || !canMove || gameState.currentPos.x >= mapSize - 1}
+                        className="absolute top-1/2 right-0 -translate-y-1/2 w-14 h-14 bg-gradient-to-t from-blue-600 to-blue-500 rounded-lg shadow-lg border-b-4 border-blue-800 active:border-b-0 active:translate-y-1 transition-all flex items-center justify-center group z-10 disabled:opacity-30 disabled:cursor-not-allowed"
+                      >
+                        <span className="material-icons-round text-white font-bold group-hover:scale-110 transition-transform">arrow_forward</span>
+                      </button>
+                      <button
+                        onClick={() => handleMove(Direction.Down)}
+                        disabled={!gameState?.active || isPending || isConfirming || isMoving || isApproving || !canMove || gameState.currentPos.y === 0}
+                        className="absolute bottom-0 left-1/2 -translate-x-1/2 w-14 h-14 bg-gradient-to-t from-blue-600 to-blue-500 rounded-lg shadow-lg border-b-4 border-blue-800 active:border-b-0 active:translate-y-1 transition-all flex items-center justify-center group z-10 disabled:opacity-30 disabled:cursor-not-allowed"
+                      >
+                        <span className="material-icons-round text-white font-bold group-hover:scale-110 transition-transform">arrow_downward</span>
+                      </button>
+                      <div className="absolute top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2 w-12 h-12 bg-gray-100 dark:bg-slate-900 rounded-full shadow-inner flex items-center justify-center border border-gray-200 dark:border-white/5">
+                        <div className="w-8 h-8 rounded-full bg-surface-light dark:bg-surface-dark shadow-sm"></div>
+                      </div>
+                    </div>
+                    <p className="mt-8 text-xs text-gray-500 font-medium">Use arrow keys or click buttons</p>
+                  </div>
+                )}
+
+                {/* Quick Actions */}
+                <div className="bg-surface-light dark:bg-surface-dark p-6 rounded-2xl border border-gray-200 dark:border-white/10 shadow-lg flex flex-col">
+                  <div className="flex items-center gap-2 mb-6">
+                    <span className="material-icons-round text-accent-yellow">bolt</span>
+                    <h2 className="font-display font-bold text-lg uppercase tracking-wide">Quick Actions</h2>
+                  </div>
+                  <div className="space-y-4">
+                    {!gameState?.active ? (
+                      <>
+                        {/* Show claim button if there's a pending reward (e.g., after winning treasure) */}
+                        {gameState && gameState.pendingReward > 0n ? (
+                          <button
+                            onClick={handleStopAndClaim}
+                            disabled={isPending || isConfirming || isClaiming || !gameState?.pendingReward || gameState.pendingReward === 0n}
+                            className="w-full relative overflow-hidden group rounded-xl bg-gradient-to-r from-amber-600 to-orange-600 p-[1px] disabled:opacity-50 disabled:cursor-not-allowed"
+                          >
+                            <div className="relative bg-surface-light dark:bg-surface-dark hover:bg-transparent group-hover:bg-transparent transition-colors rounded-xl px-4 py-3 flex items-center justify-between">
+                              <div className="flex items-center gap-3">
+                                <div className="w-8 h-8 rounded-full bg-amber-500/20 flex items-center justify-center">
+                                  <span className="material-icons-round text-amber-500 group-hover:text-white transition-colors">emoji_events</span>
+                                </div>
+                                <div className="text-left">
+                                  <span className="block text-sm font-bold text-gray-800 dark:text-white group-hover:text-white">
+                                    {isClaiming ? 'Claiming...' : 'Claim Reward'}
+                                  </span>
+                                  <span className="block text-xs text-amber-500 group-hover:text-amber-200">
+                                    {gameState.pendingReward ? formatUnits(gameState.pendingReward, 6) : '0'} USDC
+                                  </span>
+                                </div>
+                              </div>
+                            </div>
+                          </button>
+                        ) : (
+                          <>
+                            {(!allowance || (allowance as bigint) < entryFee) ? (
+                              <button
+                                onClick={handleApprove}
+                                disabled={isApproving || isPending || isConfirming || !entryFee || usdcBalance < entryFee}
+                                className="w-full relative overflow-hidden group rounded-xl bg-gradient-to-r from-violet-600 to-fuchsia-600 p-[1px] disabled:opacity-50 disabled:cursor-not-allowed"
+                              >
+                                <div className="relative bg-surface-light dark:bg-surface-dark hover:bg-transparent group-hover:bg-transparent transition-colors rounded-xl px-4 py-3 flex items-center justify-between">
+                                  <div className="flex items-center gap-3">
+                                    <div className="w-8 h-8 rounded-full bg-violet-500/20 flex items-center justify-center">
+                                      <span className="material-icons-round text-violet-400 group-hover:text-white transition-colors">lock</span>
+                                    </div>
+                                    <div className="text-left">
+                                      <span className="block text-sm font-bold text-gray-800 dark:text-white group-hover:text-white">
+                                        {isApproving ? 'Approving...' : 'Approve USDC'}
+                                      </span>
+                                      <span className="block text-xs text-violet-500 group-hover:text-violet-200">
+                                        {entryFee ? formatUnits(entryFee, 6) : '...'} USDC
+                                      </span>
+                                    </div>
+                                  </div>
+                                  <span className="material-icons-round text-gray-400 group-hover:text-white transform group-hover:translate-x-1 transition-transform">chevron_right</span>
+                                </div>
+                              </button>
+                            ) : (
+                              <button
+                                onClick={handleStartGame}
+                                disabled={isStartingGame || isPending || isConfirming || !entryFee}
+                                className="w-full relative overflow-hidden group rounded-xl bg-gradient-to-r from-violet-600 to-fuchsia-600 p-[1px] disabled:opacity-50 disabled:cursor-not-allowed"
+                              >
+                                <div className="relative bg-surface-light dark:bg-surface-dark hover:bg-transparent group-hover:bg-transparent transition-colors rounded-xl px-4 py-3 flex items-center justify-between">
+                                  <div className="flex items-center gap-3">
+                                    <div className="w-8 h-8 rounded-full bg-violet-500/20 flex items-center justify-center">
+                                      <span className="material-icons-round text-violet-400 group-hover:text-white transition-colors">play_arrow</span>
+                                    </div>
+                                    <div className="text-left">
+                                      <span className="block text-sm font-bold text-gray-800 dark:text-white group-hover:text-white">
+                                        {isStartingGame ? 'Starting...' : 'Start Game'}
+                                      </span>
+                                      <span className="block text-xs text-violet-500 group-hover:text-violet-200">
+                                        {entryFee ? formatUnits(entryFee, 6) : '...'} USDC
+                                      </span>
+                                    </div>
+                                  </div>
+                                  <span className="material-icons-round text-gray-400 group-hover:text-white transform group-hover:translate-x-1 transition-transform">chevron_right</span>
+                                </div>
+                              </button>
+                            )}
+                          </>
+                        )}
+                      </>
+                    ) : (
+                      <>
+                        {!gameState.shieldPurchased && (
+                          <button
+                            onClick={handleBuyShield}
+                            disabled={isPending || isConfirming || isBuyingShield || isApproving || !shieldPrice || usdcBalance < (shieldPrice as bigint)}
+                            className="w-full relative overflow-hidden group rounded-xl bg-gradient-to-r from-violet-600 to-fuchsia-600 p-[1px] disabled:opacity-50 disabled:cursor-not-allowed"
+                          >
+                            <div className="relative bg-surface-light dark:bg-surface-dark hover:bg-transparent group-hover:bg-transparent transition-colors rounded-xl px-4 py-3 flex items-center justify-between">
+                              <div className="flex items-center gap-3">
+                                <div className="w-8 h-8 rounded-full bg-violet-500/20 flex items-center justify-center">
+                                  <span className="material-icons-round text-violet-400 group-hover:text-white transition-colors">shield</span>
+                                </div>
+                                <div className="text-left">
+                                  <span className="block text-sm font-bold text-gray-800 dark:text-white group-hover:text-white">Buy Shield</span>
+                                  <span className="block text-xs text-violet-500 group-hover:text-violet-200">
+                                    {shieldPrice ? formatUnits(shieldPrice as bigint, 6) : '...'} USDC
+                                  </span>
+                                </div>
+                              </div>
+                              <span className="material-icons-round text-gray-400 group-hover:text-white transform group-hover:translate-x-1 transition-transform">chevron_right</span>
+                            </div>
+                          </button>
+                        )}
+                        <button
+                          onClick={handleStopAndClaim}
+                          disabled={isPending || isConfirming || isClaiming || !gameState?.active || !gameState?.pendingReward || gameState.pendingReward === 0n}
+                          className="w-full relative overflow-hidden group rounded-xl bg-gradient-to-r from-amber-600 to-orange-600 p-[1px] disabled:opacity-50 disabled:cursor-not-allowed"
+                        >
+                          <div className="relative bg-surface-light dark:bg-surface-dark hover:bg-transparent group-hover:bg-transparent transition-colors rounded-xl px-4 py-3 flex items-center justify-between">
+                            <div className="flex items-center gap-3">
+                              <div className="w-8 h-8 rounded-full bg-amber-500/20 flex items-center justify-center">
+                                <span className="material-icons-round text-amber-500 group-hover:text-white transition-colors">lock_clock</span>
+                              </div>
+                              <div className="text-left">
+                                <span className="block text-sm font-bold text-gray-800 dark:text-white group-hover:text-white">
+                                  {isClaiming ? 'Claiming...' : 'Stop & Claim'}
+                                </span>
+                                <span className="block text-xs text-amber-500 group-hover:text-amber-200">Safe Exit</span>
+                              </div>
+                            </div>
+                          </div>
+                        </button>
+                      </>
+                    )}
+                  </div>
+                </div>
+              </div>
             </div>
-          </div>
+
+            {/* How to Play */}
+            <section className="bg-surface-light dark:bg-surface-dark rounded-2xl border border-gray-200 dark:border-white/10 shadow-lg p-6">
+              <div className="flex items-center gap-2 mb-6">
+                <span className="material-icons-round text-gray-400">help</span>
+                <h2 className="font-display font-bold text-lg uppercase tracking-wide">How to Play</h2>
+              </div>
+              <div className="grid md:grid-cols-3 gap-6">
+                <div className="flex gap-4 items-start">
+                  <div className="w-8 h-8 rounded bg-primary/20 flex items-center justify-center shrink-0">
+                    <span className="material-icons-round text-primary text-sm">payments</span>
+                  </div>
+                  <div>
+                    <h3 className="font-bold text-sm mb-1">Entry Fee</h3>
+                    <p className="text-xs text-gray-500 dark:text-gray-400 leading-relaxed">
+                      Pay <strong>5 USDC</strong> entry fee to begin your on-chain adventure. All transactions are verifiable.
+                    </p>
+                  </div>
+                </div>
+                <div className="flex gap-4 items-start">
+                  <div className="w-8 h-8 rounded bg-accent-cyan/20 flex items-center justify-center shrink-0">
+                    <span className="material-icons-round text-accent-cyan text-sm">ads_click</span>
+                  </div>
+                  <div>
+                    <h3 className="font-bold text-sm mb-1">Navigation</h3>
+                    <p className="text-xs text-gray-500 dark:text-gray-400 leading-relaxed">
+                      Navigate the grid using the D-Pad. Each move costs gas + a small fee.
+                    </p>
+                  </div>
+                </div>
+                <div className="flex gap-4 items-start">
+                  <div className="w-8 h-8 rounded bg-accent-pink/20 flex items-center justify-center shrink-0">
+                    <span className="material-icons-round text-accent-pink text-sm">casino</span>
+                  </div>
+                  <div>
+                    <h3 className="font-bold text-sm mb-1">Outcomes</h3>
+                    <p className="text-xs text-gray-500 dark:text-gray-400 leading-relaxed">
+                      Every square has a random outcome: Empty, Reward, Treasure, or Bomb. Good luck!
+                    </p>
+                  </div>
+                </div>
+              </div>
+            </section>
+          </>
         )}
-
-        {/* Action Buttons */}
-        <div className="bg-gradient-to-br from-slate-800/90 to-slate-900/90 backdrop-blur-2xl rounded-3xl p-8 border-2 border-pink-500/30 shadow-2xl shadow-pink-500/20">
-          <h2 className="text-3xl font-black text-transparent bg-clip-text bg-gradient-to-r from-pink-400 to-rose-400 mb-6 text-center">
-            ⚡ QUICK ACTIONS
-          </h2>
-          <div className="flex flex-col sm:flex-row gap-4">
-            {!gameState?.active ? (
-              <>
-                {/* Check if approval is needed */}
-                {(!allowance || (allowance as bigint) < entryFee) ? (
-                  <button
-                    onClick={handleApprove}
-                    disabled={isApproving || isPending || isConfirming || !entryFee || usdcBalance < entryFee}
-                    className="flex-1 bg-gradient-to-r from-blue-600 to-cyan-600 hover:from-blue-500 hover:to-cyan-500 disabled:opacity-30 disabled:cursor-not-allowed text-white font-black py-6 px-8 rounded-2xl transition-all transform hover:scale-105 active:scale-95 shadow-2xl shadow-blue-500/50 border-2 border-blue-400/50 text-lg"
-                  >
-                    {isApproving ? '⏳ APPROVING...' : `💳 APPROVE USDC (${entryFee ? formatUnits(entryFee, 6) : '...'} USDC)`}
-                  </button>
-                ) : (
-                  <button
-                    onClick={handleStartGame}
-                    disabled={isStartingGame || isPending || isConfirming || !entryFee}
-                    className="flex-1 bg-gradient-to-r from-purple-600 via-pink-600 to-rose-600 hover:from-purple-500 hover:via-pink-500 hover:to-rose-500 disabled:opacity-30 disabled:cursor-not-allowed text-white font-black py-6 px-8 rounded-2xl transition-all transform hover:scale-105 active:scale-95 shadow-2xl shadow-purple-500/50 border-2 border-purple-400/50 text-lg"
-                  >
-                    {isStartingGame ? '⏳ STARTING...' : `🚀 START ADVENTURE (${entryFee ? formatUnits(entryFee, 6) : '...'} USDC)`}
-                  </button>
-                )}
-              </>
-            ) : (
-              <>
-                {!gameState.shieldPurchased && (
-                  <button
-                    onClick={handleBuyShield}
-                    disabled={isPending || isConfirming || isBuyingShield || isApproving || !shieldPrice || usdcBalance < (shieldPrice as bigint)}
-                    className="flex-1 bg-gradient-to-r from-indigo-600 to-purple-600 hover:from-indigo-500 hover:to-purple-500 disabled:opacity-30 disabled:cursor-not-allowed text-white font-black py-6 px-8 rounded-2xl transition-all transform hover:scale-105 active:scale-95 shadow-2xl shadow-indigo-500/50 border-2 border-indigo-400/50 text-lg"
-                  >
-                    {isPending || isConfirming || isBuyingShield || isApproving ? '⏳ PROCESSING...' : `🛡️ BUY SHIELD (${shieldPrice ? formatUnits(shieldPrice as bigint, 6) : '...'} USDC)`}
-                  </button>
-                )}
-                <button
-                  onClick={handleStopAndClaim}
-                  disabled={
-                    isPending ||
-                    isConfirming ||
-                    isClaiming ||
-                    !gameState?.active ||
-                    !gameState?.pendingReward ||
-                    gameState.pendingReward === 0n
-                  }
-                  className="flex-1 bg-gradient-to-r from-yellow-500 via-orange-500 to-red-500 hover:from-yellow-400 hover:via-orange-400 hover:to-red-400 disabled:opacity-30 disabled:cursor-not-allowed text-white font-black py-6 px-8 rounded-2xl transition-all transform hover:scale-105 active:scale-95 shadow-2xl shadow-orange-500/50 border-2 border-yellow-400/50 text-lg"
-                >
-                  {isPending || isConfirming || isClaiming ? '⏳ CLAIMING...' : '💰 STOP & CLAIM REWARDS'}
-                </button>
-              </>
-            )}
-          </div>
-        </div>
-
-        {/* Game Rules */}
-        <div className="bg-gradient-to-br from-slate-800/90 to-purple-900/90 backdrop-blur-2xl rounded-3xl p-8 border-2 border-purple-500/30 shadow-2xl shadow-purple-500/20">
-          <h2 className="text-3xl font-black text-transparent bg-clip-text bg-gradient-to-r from-purple-400 to-pink-400 mb-6">📖 HOW TO PLAY</h2>
-          <div className="space-y-4 text-gray-200 text-lg">
-            <div className="flex items-start gap-3 bg-slate-900/50 p-4 rounded-xl border border-purple-500/20">
-              <span className="text-2xl">💵</span>
-              <p>Pay <strong className="text-cyan-400 font-bold">5 USDC</strong> entry fee to begin your adventure</p>
-            </div>
-            <div className="flex items-start gap-3 bg-slate-900/50 p-4 rounded-xl border border-purple-500/20">
-              <span className="text-2xl">🎮</span>
-              <p>Navigate the 2D grid using directional buttons (Up, Down, Left, Right)</p>
-            </div>
-            <div className="flex items-start gap-3 bg-slate-900/50 p-4 rounded-xl border border-purple-500/20">
-              <span className="text-2xl">🎲</span>
-              <p>Each move has random outcomes with chances for rewards or empty spaces</p>
-            </div>
-            <div className="bg-slate-900/50 p-5 rounded-xl border border-purple-500/20">
-              <p className="font-bold text-cyan-400 mb-3 text-xl">Move Outcomes:</p>
-              <ul className="space-y-2 ml-4">
-                <li className="flex items-center gap-2">
-                  <span className="text-gray-400 font-bold">→</span>
-                  <span className="text-gray-300">Empty Space - Safe passage, continue exploring</span>
-                </li>
-                <li className="flex items-center gap-2">
-                  <span className="text-green-400 font-bold">→</span>
-                  <span className="text-green-300">Reward - Earn USDC! More moves = bigger rewards</span>
-                </li>
-                <li className="flex items-center gap-2">
-                  <span className="text-yellow-400 font-bold">→</span>
-                  <span className="text-yellow-300">Treasure - Massive reward + instant game victory!</span>
-                </li>
-              </ul>
-            </div>
-            <div className="flex items-start gap-3 bg-slate-900/50 p-4 rounded-xl border border-red-500/30">
-              <span className="text-2xl">💣</span>
-              <p><span className="text-red-400 font-bold">DANGER!</span> Hit a bomb = instant game over + lose all rewards (unless protected by shield)</p>
-            </div>
-            <div className="flex items-start gap-3 bg-slate-900/50 p-4 rounded-xl border border-indigo-500/30">
-              <span className="text-2xl">🛡️</span>
-              <p><span className="text-indigo-400 font-bold">Shield Protection:</span> Buy a shield to survive one bomb hit (limited to 1 per game)</p>
-            </div>
-            <div className="flex items-start gap-3 bg-slate-900/50 p-4 rounded-xl border border-purple-500/30">
-              <span className="text-2xl">🏆</span>
-              <p>Find the <span className="text-purple-400 font-bold">legendary treasure</span> at the end position for maximum rewards!</p>
-            </div>
-            <div className="flex items-start gap-3 bg-slate-900/50 p-4 rounded-xl border border-yellow-500/30">
-              <span className="text-2xl">💰</span>
-              <p>You can <strong className="text-yellow-400 font-bold">Stop & Claim</strong> rewards at any time to secure your earnings</p>
-            </div>
-            <div className="flex items-start gap-3 bg-slate-900/50 p-4 rounded-xl border border-orange-500/30">
-              <span className="text-2xl">📈</span>
-              <p><strong className="text-orange-400 font-bold">Move fees increase</strong> progressively (1.25-1.5x multiplier each move)</p>
-            </div>
-          </div>
-        </div>
-      </div>
-    )}
-  </div>
-</main>
-)
+      </main>
+    </div>
+  )
 }

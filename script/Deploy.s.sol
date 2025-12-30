@@ -13,8 +13,8 @@ contract DeployScript is Script {
     uint256 public constant BASE_SHIELD_PRICE = 2 * 1e6; // 2 USDC (6 decimals)
     uint256 public constant BASE_REWARD = 5 * 1e5;      // 0.5 USDC (6 decimals)
     uint256 public constant TREASURE_BONUS = 10 * 1e6;  // 10 USDC (6 decimals)
-    uint8 public constant MAP_SIZE = 20;                // 20x20 grid
-    uint8 public constant NUM_BOMBS = 15;               // 15 bombs per map
+    uint8 public constant MAP_SIZE = 10;                // 10x10 grid
+    uint8 public constant NUM_BOMBS = 10;               // 10 bombs per map (reduced from 15 for better balance)
     uint8 public constant BOMB_DENSITY_NEAR_END = 30;  // 30% additional density near end
     
     // USDC address on Arc Testnet
