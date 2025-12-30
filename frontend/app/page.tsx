@@ -50,6 +50,8 @@ export default function Home() {
   const [entryFee, setEntryFee] = useState<bigint>(0n)
   const [mapSize, setMapSize] = useState<number>(20)
   const [bombMap, setBombMap] = useState<Set<string>>(new Set()) // Store bomb positions as "x,y" strings
+  const [bombNotification, setBombNotification] = useState<{ show: boolean; shielded: boolean }>({ show: false, shielded: false })
+  const [previousGameState, setPreviousGameState] = useState<{ active: boolean; pendingReward: bigint; hasShield: boolean; moveCount: number } | null>(null)
 
   // Read game state
   const { data: gameData, refetch: refetchGame } = useReadContract({
@@ -148,7 +150,7 @@ export default function Home() {
 
   useEffect(() => {
     if (gameData) {
-      setGameState({
+      const newGameState = {
         seed: BigInt(gameData[0] as string | number | bigint),
         currentPos: { x: Number(gameData[1].x), y: Number(gameData[1].y) },
         startPos: { x: Number(gameData[2].x), y: Number(gameData[2].y) },
@@ -158,10 +160,47 @@ export default function Home() {
         hasShield: gameData[6] as boolean,
         shieldPurchased: gameData[7] as boolean,
         moveCount: Number(gameData[8]),
+      }
+      
+      // Check for bomb hit: game was active before, now inactive, and pendingReward is 0
+      // Also check if moveCount increased (indicating a move was made)
+      const moveCountIncreased = previousGameState ? newGameState.moveCount > previousGameState.moveCount : false
+      const hadRewardBefore = previousGameState ? previousGameState.pendingReward > 0n : false
+      
+      // Detect unshielded bomb: game ended, reward lost, and a move was made
+      // Conditions: game was active, now inactive, reward is 0, had reward before OR made a move, and moveCount increased
+      if (previousGameState?.active && !newGameState.active && newGameState.pendingReward === 0n && (hadRewardBefore || newGameState.moveCount > 0) && moveCountIncreased) {
+        // This indicates a bomb was hit (game ended, reward lost)
+        setBombNotification({ show: true, shielded: false })
+        // Auto-hide notification after 5 seconds
+        setTimeout(() => {
+          setBombNotification({ show: false, shielded: false })
+        }, 5000)
+      }
+      
+      // Check for shielded bomb hit: game was active, still active, but shield was used
+      // Shield was used if: had shield before, don't have shield now, shield was purchased, and moveCount increased
+      const hadShieldBefore = previousGameState?.hasShield ?? false
+      if (previousGameState?.active && newGameState.active && hadShieldBefore && !newGameState.hasShield && newGameState.shieldPurchased && moveCountIncreased) {
+        // Shield was used to protect from bomb
+        setBombNotification({ show: true, shielded: true })
+        setTimeout(() => {
+          setBombNotification({ show: false, shielded: false })
+        }, 5000)
+      }
+      
+      setGameState(newGameState)
+      // Update previous state for next comparison (include all needed fields)
+      setPreviousGameState({
+        active: newGameState.active,
+        pendingReward: newGameState.pendingReward,
+        hasShield: newGameState.hasShield,
+        moveCount: newGameState.moveCount
       })
     } else {
       // Reset game state when no game data (game ended or not started)
       setGameState(null)
+      setPreviousGameState(null)
     }
   }, [gameData])
 
@@ -235,6 +274,8 @@ export default function Home() {
     if (isStartGameSuccess) {
       // Reset bomb map when starting new game
       setBombMap(new Set())
+      // Reset previous game state to avoid false bomb detection
+      setPreviousGameState(null)
       
       // Small delay to ensure blockchain state is updated
       setTimeout(() => {
@@ -270,6 +311,16 @@ export default function Home() {
   // Refetch after move succeeds
   useEffect(() => {
     if (isMoveSuccess) {
+      // Store current state before refetch to detect bomb hits
+      if (gameState) {
+        setPreviousGameState({
+          active: gameState.active,
+          pendingReward: gameState.pendingReward,
+          hasShield: gameState.hasShield,
+          moveCount: gameState.moveCount
+        })
+      }
+      
       // Small delay to ensure blockchain state is updated
       setTimeout(() => {
         refetchGame()
@@ -280,6 +331,11 @@ export default function Home() {
         refetchShieldPrice()
         setMoveHash(undefined)
       }, 500)
+      
+      // Additional refetch to ensure bomb detection works
+      setTimeout(() => {
+        refetchGame()
+      }, 1500)
     }
   }, [isMoveSuccess, refetchGame, refetchBalance, refetchAllowance, refetchCanMove, refetchNextMoveFee, refetchShieldPrice])
 
@@ -545,6 +601,19 @@ export default function Home() {
     if (gameState.endPos) {
       console.log('Treasure position:', gameState.endPos)
     }
+    
+    // Ensure endPos is valid (check if it exists and has valid coordinates)
+    // Note: x and y can be 0, so we check for null/undefined differently
+    if (gameState.endPos == null || 
+        typeof gameState.endPos.x !== 'number' || 
+        typeof gameState.endPos.y !== 'number' ||
+        gameState.endPos.x < 0 || 
+        gameState.endPos.y < 0 ||
+        gameState.endPos.x >= mapSize || 
+        gameState.endPos.y >= mapSize) {
+      console.warn('endPos is not properly set:', gameState.endPos)
+      // Don't return null, just show the map without treasure indicator
+    }
 
     const grid = []
     for (let y = mapSize - 1; y >= 0; y--) {
@@ -659,6 +728,19 @@ export default function Home() {
           </div>
           <ConnectButton />
         </div>
+
+        {/* Bomb Hit Notification */}
+        {bombNotification.show && (
+          <div className={`fixed top-4 left-1/2 transform -translate-x-1/2 z-50 animate-bounce ${bombNotification.shielded ? 'bg-gradient-to-r from-indigo-600 to-purple-600' : 'bg-gradient-to-r from-red-600 to-rose-600'} text-white font-black py-6 px-8 rounded-2xl shadow-2xl border-4 ${bombNotification.shielded ? 'border-indigo-400' : 'border-red-400'} max-w-md`}>
+            <div className="flex items-center gap-4">
+              <span className="text-4xl">{bombNotification.shielded ? '🛡️' : '💣'}</span>
+              <div>
+                <p className="text-2xl mb-1">{bombNotification.shielded ? 'SHIELD ACTIVATED!' : '💥 BOMB HIT! 💥'}</p>
+                <p className="text-lg">{bombNotification.shielded ? 'Your shield protected you from the bomb!' : 'Game Over! All rewards lost!'}</p>
+              </div>
+            </div>
+          </div>
+        )}
 
         {!isConnected ? (
           <div className="bg-gradient-to-br from-slate-800/90 to-purple-900/90 backdrop-blur-2xl rounded-3xl p-12 text-center border-2 border-purple-500/30 shadow-2xl shadow-purple-500/50">
