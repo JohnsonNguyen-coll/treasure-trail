@@ -150,7 +150,37 @@ export default function Home() {
 
   useEffect(() => {
     if (gameData) {
-      // Parse endPos safely - handle both object and array formats
+      // Parse positions safely - handle both object and array formats
+      let currentPosX = 0
+      let currentPosY = 0
+      if (gameData[1]) {
+        if (typeof gameData[1] === 'object') {
+          // Could be {x: number, y: number} or [x, y]
+          if ('x' in gameData[1] && 'y' in gameData[1]) {
+            currentPosX = Number(gameData[1].x)
+            currentPosY = Number(gameData[1].y)
+          } else if (Array.isArray(gameData[1])) {
+            currentPosX = Number(gameData[1][0])
+            currentPosY = Number(gameData[1][1])
+          }
+        }
+      }
+
+      let startPosX = 0
+      let startPosY = 0
+      if (gameData[2]) {
+        if (typeof gameData[2] === 'object') {
+          // Could be {x: number, y: number} or [x, y]
+          if ('x' in gameData[2] && 'y' in gameData[2]) {
+            startPosX = Number(gameData[2].x)
+            startPosY = Number(gameData[2].y)
+          } else if (Array.isArray(gameData[2])) {
+            startPosX = Number(gameData[2][0])
+            startPosY = Number(gameData[2][1])
+          }
+        }
+      }
+
       let endPosX = 0
       let endPosY = 0
       if (gameData[3]) {
@@ -168,8 +198,8 @@ export default function Home() {
       
       const newGameState = {
         seed: BigInt(gameData[0] as string | number | bigint),
-        currentPos: { x: Number(gameData[1]?.x ?? gameData[1]?.[0] ?? 0), y: Number(gameData[1]?.y ?? gameData[1]?.[1] ?? 0) },
-        startPos: { x: Number(gameData[2]?.x ?? gameData[2]?.[0] ?? 0), y: Number(gameData[2]?.y ?? gameData[2]?.[1] ?? 0) },
+        currentPos: { x: currentPosX, y: currentPosY },
+        startPos: { x: startPosX, y: startPosY },
         endPos: { x: endPosX, y: endPosY },
         pendingReward: BigInt(gameData[4] as string | number | bigint),
         active: gameData[5] as boolean,
